@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 2s # Scrape frequently for our fast-paced simulation
+
+scrape_configs:
+  - job_name: 'siem_mock_environment'
+    static_configs:
+      - targets: 
+        # Port 8001 = log_generator, Port 8002 = siem_engine
+        - 'host.docker.internal:8001'
+        - 'host.docker.internal:8002'
