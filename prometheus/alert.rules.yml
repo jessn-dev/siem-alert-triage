@@ -1,0 +1,24 @@
+groups:
+  - name: siem_alerts
+    rules:
+      - alert: HighAlertVolume
+        # If the SIEM generates any alerts in a 1m window, trigger this rule.
+        # This proves the ability to alert on SIEM output.
+        expr: rate(siem_alerts_generated_total[1m]) > 0
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "High volume of SIEM alerts generated"
+          description: "The SIEM engine is generating alerts rapidly, indicating an ongoing attack or noisy rule."
+          
+      - alert: SIEMComponentDown
+        # Deadman switch: if the log_generator or siem_engine crashes.
+        # This proves the ability to monitor the health of the SOC infrastructure itself.
+        expr: up{job="siem_mock_environment"} == 0
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: "SIEM Mock Component Down (Blind SOC)"
+          description: "A core SIEM component is not responding to Prometheus scrapes. SOC visibility is impaired."

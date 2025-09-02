@@ -1,54 +1,64 @@
 # Mock SIEM Alerting and Triage Pipeline
 
-This project demonstrates the core concepts of a Security Information and Event Management (SIEM) system. It simulates log ingestion, applies stateful detection logic (rules), generates structured alerts, and exposes performance/security metrics via Prometheus and Grafana.
+A functional SIEM pipeline that covers log ingestion, stateful detection, alerting, and observability. It uses Prometheus, Grafana, and Alertmanager.
 
-This is an excellent portfolio piece to demonstrate an understanding of:
-- **Log Parsing & Normalization**: Handling structured JSON logs.
-- **Detection Engineering**: Writing logic to detect suspicious patterns over time (e.g., brute-force attacks).
-- **Incident Response & Triage**: Generating actionable alerts with context.
-- **Security Observability**: Building dashboards with Prometheus and Grafana.
+## Core Features
+- **Log Parsing**: Parses and normalizes raw JSON authentication logs.
+- **Detection Engine**: Detects brute-force attacks across sliding time windows using a Python backend.
+- **Alert Routing**: Forwards critical events to a mock webhook receiver via Alertmanager.
+- **Observability**: Exposes metrics to Prometheus and provides a Grafana dashboard for real-time traffic monitoring.
+- **Testing**: Includes a pytest suite covering time boundaries, state cleanup, and log validation.
 
 ## Prerequisites
-- Python 3.x
-- Docker and Docker Compose (for Prometheus/Grafana)
+- Python 3
+- Docker and Docker Compose
 
 ## Setup
 
-First, install the Python dependencies:
+Install the Python requirements:
 ```bash
 pip install -r requirements.txt
 ```
 
-Next, spin up the monitoring stack (Prometheus & Grafana) using Docker:
+Start the monitoring stack:
 ```bash
 docker-compose up -d
 ```
 
-## Running the Simulation
+## Running the Engine
 
-You will need two terminal windows to see the Python application in action.
+You need two terminals.
 
-### Terminal 1: Start the Log Generator
-This script writes mock logs to `logs/auth.log` and exposes metrics on `http://localhost:8001/metrics`.
+Terminal 1 runs the log generator on port 8001:
 ```bash
 python3 log_generator.py
 ```
 
-### Terminal 2: Start the SIEM Engine
-This script tails the `auth.log` file, detects attacks, generates alerts in the `alerts/` folder, and exposes metrics on `http://localhost:8002/metrics`.
+Terminal 2 runs the SIEM engine on port 8002:
 ```bash
 python3 siem_engine.py
 ```
 
-## Viewing the Dashboards (Grafana)
+## Viewing Dashboards
 
-1. Open your browser and navigate to `http://localhost:3000`.
-2. Login with the default credentials: username `admin`, password `admin`.
-3. Grafana is already connected to Prometheus as a data source.
-4. You can now build dashboards to visualize metrics such as:
-   - `mock_logs_generated_total{status="failed"}`: Failed login rate.
-   - `siem_alerts_generated_total`: Alerts firing over time.
-   - `siem_active_tracked_ips`: IPs currently being tracked for suspicious behavior.
+The project sets up a Grafana dashboard automatically.
 
-## Triage workflow
-When the SIEM engine generates an alert, view it in the `alerts/` directory and follow the triage steps outlined in the JSON file.
+1. Go to `http://localhost:3000`
+2. Login with `admin` / `admin`
+3. Click **Dashboards** > **Browse** and open the **SIEM Observability Overview** board.
+
+## Alerting
+
+When the SIEM engine triggers a rule, it drops a JSON file into the `alerts/` folder. Prometheus then evaluates the metric spikes against its rule file (`alert.rules.yml`) and passes the state to Alertmanager.
+
+Alertmanager routes the payload to a local webhook receiver. Watch the alerts arrive in real time:
+```bash
+docker logs -f siem_webhook_receiver
+```
+
+## Running Tests
+
+Run the test suite to verify the detection logic:
+```bash
+python3 -m pytest tests/
+```

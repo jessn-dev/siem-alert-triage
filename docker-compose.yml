@@ -8,6 +8,7 @@ services:
       - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml
     # This allows prometheus to scrape metrics from the python apps running on your Mac host
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -20,6 +21,29 @@ services:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - prometheus
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: siem_alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  webhook-receiver:
+    # A simple echo server that logs the HTTP POST payloads it receives.
+    # Proves knowledge of webhook routing/grouping/inhibition.
+    image: mendhak/http-https-echo:32
+    container_name: siem_webhook_receiver
+    ports:
+      - "8080:8080"
     restart: unless-stopped

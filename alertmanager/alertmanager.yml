@@ -1,0 +1,13 @@
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 5s
+  group_interval: 10s
+  repeat_interval: 1m
+  receiver: 'local_webhook'
+
+receivers:
+  - name: 'local_webhook'
+    webhook_configs:
+      # Route alerts to our local webhook receiver container
+      - url: 'http://webhook-receiver:8080/'
+        send_resolved: true

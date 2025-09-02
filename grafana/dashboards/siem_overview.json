@@ -1,0 +1,42 @@
+{
+  "title": "SIEM Observability Overview",
+  "tags": ["siem", "security"],
+  "timezone": "browser",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Authentication Logs Generated (Rate)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "rate(mock_logs_generated_total[1m])",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Active Tracked IPs",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "siem_active_tracked_ips",
+          "legendFormat": "IPs Tracking"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "SIEM Alerts Generated",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "siem_alerts_generated_total",
+          "legendFormat": "Alerts Fired"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 38,
+  "refresh": "5s"
+}
