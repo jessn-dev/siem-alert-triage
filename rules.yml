@@ -1,0 +1,18 @@
+rules:
+  - id: "R001"
+    name: "Potential Brute Force Attack"
+    description: "Detects multiple failed login attempts from a single IP within a short time window."
+    mitre_attack: "T1110.001"
+    severity: "MEDIUM"
+    threshold: 3
+    time_window: 30
+    suppression_window: 60
+
+  - id: "R002"
+    name: "Successful Compromise Following Brute Force"
+    description: "Detects a successful login from an IP immediately following a series of failed attempts."
+    mitre_attack: "T1110.003"
+    severity: "CRITICAL"
+    threshold: 3      # Number of failed attempts required
+    time_window: 60   # Time window to look back for fails
+    suppression_window: 120

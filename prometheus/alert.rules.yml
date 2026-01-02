@@ -2,19 +2,26 @@ groups:
   - name: siem_alerts
     rules:
       - alert: HighAlertVolume
-        # If the SIEM generates any alerts in a 1m window, trigger this rule.
-        # This proves the ability to alert on SIEM output.
-        expr: rate(siem_alerts_generated_total[1m]) > 0
+        # Fix 1: Require at least 3 alerts over 5 minutes to prevent stuck alerts
+        expr: increase(siem_alerts_generated_total[5m]) > 3
         for: 10s
         labels:
-          severity: critical
+          severity: warning
         annotations:
           summary: "High volume of SIEM alerts generated"
           description: "The SIEM engine is generating alerts rapidly, indicating an ongoing attack or noisy rule."
           
+      - alert: MalformedLogsSpike
+        # Fix 2: Alert on parsing failures
+        expr: rate(siem_logs_malformed_total[1m]) > 0
+        for: 15s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spike in Malformed Logs"
+          description: "The SIEM engine is failing to parse incoming logs. Check log format."
+
       - alert: SIEMComponentDown
-        # Deadman switch: if the log_generator or siem_engine crashes.
-        # This proves the ability to monitor the health of the SOC infrastructure itself.
         expr: up{job="siem_mock_environment"} == 0
         for: 15s
         labels:

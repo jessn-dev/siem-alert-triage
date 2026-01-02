@@ -2,12 +2,32 @@ route:
   group_by: ['alertname', 'severity']
   group_wait: 5s
   group_interval: 10s
-  repeat_interval: 1m
-  receiver: 'local_webhook'
+  # Fix 1: Production-ready repeat interval
+  repeat_interval: 4h
+  # Fix 2: Actual routing tree
+  receiver: 'ticket_webhook'
+  routes:
+    - match:
+        severity: critical
+      receiver: 'pager_webhook'
+    - match:
+        severity: warning
+      receiver: 'ticket_webhook'
+
+inhibit_rules:
+  # Fix 3: Suppress HighAlertVolume noise when the entire SIEM is down
+  - source_match:
+      alertname: 'SIEMComponentDown'
+    target_match:
+      alertname: 'HighAlertVolume'
+    equal: ['job']
 
 receivers:
-  - name: 'local_webhook'
+  - name: 'pager_webhook'
     webhook_configs:
-      # Route alerts to our local webhook receiver container
-      - url: 'http://webhook-receiver:8080/'
+      - url: 'http://webhook-receiver:8080/page'
+        send_resolved: true
+  - name: 'ticket_webhook'
+    webhook_configs:
+      - url: 'http://webhook-receiver:8080/ticket'
         send_resolved: true

@@ -4,7 +4,7 @@ A functional SIEM pipeline that covers log ingestion, stateful detection, alerti
 
 ## Core Features
 - **Log Parsing**: Parses and normalizes raw JSON authentication logs.
-- **Detection Engine**: Detects brute-force attacks across sliding time windows using a Python backend.
+- **Detection Engine**: Detects brute-force attacks across sliding time windows using a Python backend. *(Note: State is kept in-memory for this simulation. Production scaling beyond 1 replica would require a shared state backend like Redis).*
 - **Alert Routing**: Forwards critical events to a mock webhook receiver via Alertmanager.
 - **Observability**: Exposes metrics to Prometheus and provides a Grafana dashboard for real-time traffic monitoring.
 - **Testing**: Includes a pytest suite covering time boundaries, state cleanup, and log validation.
