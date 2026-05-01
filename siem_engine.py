@@ -1,18 +1,16 @@
-import json
+import yaml
 import time
-import os
 import uuid
 import signal
 import sys
-import yaml
-from collections import defaultdict
 from datetime import datetime, timezone
 from prometheus_client import start_http_server, Counter, Gauge, Histogram
 
-LOG_FILE = "logs/auth.log"
-ALERT_DIR = "alerts/"
-RULES_FILE = "rules.yml"
-running = True
+from src.config import Config
+from src.sources.file_source import FileSource
+from src.sinks.file_sink import FileSink
+from src.state.memory import MemoryState
+from src.parsers.mock import MockParser
 
 # Metrics
 LOGS_PROCESSED = Counter('siem_logs_processed_total', 'Total logs parsed by the SIEM')
@@ -21,244 +19,124 @@ ALERTS_GENERATED = Counter('siem_alerts_generated_total', 'Total alerts generate
 ACTIVE_THREATS = Gauge('siem_active_tracked_ips', 'Number of IPs currently being tracked')
 MTTD = Histogram('siem_mttd_seconds', 'Mean Time To Detect (Detection Latency)')
 
+running = True
 def handle_sigterm(signum, frame):
     global running
-    print("\nReceived SIGTERM/SIGINT. Initiating graceful shutdown of SIEM Engine...")
+    print("\nShutting down SIEM Engine...")
     running = False
-
 signal.signal(signal.SIGINT, handle_sigterm)
 signal.signal(signal.SIGTERM, handle_sigterm)
 
 class DetectionEngine:
-    def __init__(self, rules_file):
+    def __init__(self, rules_file, state_backend):
         with open(rules_file, 'r') as f:
-            config = yaml.safe_load(f)
-        self.rules = {r['id']: r for r in config['rules']}
+            self.rules = {r['id']: r for r in yaml.safe_load(f)['rules']}
+        self.state = state_backend
         
-        # state[ip]["failed"] = [(ts, user, event_id, raw_log), ...]
-        self.state = defaultdict(lambda: {"failed": [], "success": []})
-        self.last_alerted = {} # ip -> { rule_id: ts }
-        self.watermark = 0.0 # Fix 1: Single clock domain (Max event time seen)
-        self.seen_events = set() # Fix 2: Idempotency deduplication
-    
-    def evaluate(self, log_entry):
-        if not log_entry:
-            return None
+    def evaluate(self, ocsf_event):
+        if not ocsf_event:
+            return []
             
-        event_id = log_entry.get("event_id")
-        if not event_id or event_id in self.seen_events:
-            return None # Ignore duplicates
+        event_id = ocsf_event["metadata"]["event_id"]
+        if not event_id or self.state.is_duplicate(event_id):
+            return []
             
-        self.seen_events.add(event_id)
-        if len(self.seen_events) > 10000:
-            # Naive cleanup for simulation memory management
-            self.seen_events.clear()
-            
-        ip = log_entry.get("source_ip")
-        user = log_entry.get("user")
-        ts_str = log_entry.get("timestamp")
-        status = log_entry.get("status")
+        ip = ocsf_event["src_endpoint"]["ip"]
+        user = ocsf_event["user"]["name"]
+        ts_str = ocsf_event["time"]
+        status = ocsf_event["status"]
         
-        if not ip or not user or not ts_str or not status:
-            return None
-            
         try:
             ts = datetime.fromisoformat(str(ts_str).replace('Z', '+00:00')).timestamp()
         except ValueError:
-            return None
+            return []
             
-        # Update event-time watermark
-        if ts > self.watermark:
-            self.watermark = ts
-            
-        if status == "failed":
-            self.state[ip]["failed"].append((ts, user, event_id, log_entry))
-        elif status == "success":
-            self.state[ip]["success"].append((ts, user, event_id, log_entry))
-            
-        alerts_to_fire = []
+        self.state.update_watermark(ts)
+        event_tuple = (ts, user, event_id, ocsf_event["raw_data"])
+        self.state.add_event(ip, status, event_tuple)
         
-        # Rule 1: Brute Force
+        alerts_to_fire = []
+        watermark = self.state.get_watermark()
+        
         r1 = self.rules.get("R001")
         if r1:
-            self.state[ip]["failed"] = [x for x in self.state[ip]["failed"] if self.watermark - x[0] <= r1["time_window"]]
-            
-            if len(self.state[ip]["failed"]) >= r1["threshold"]:
-                last_alert = self.last_alerted.get(ip, {}).get("R001", 0)
-                if self.watermark - last_alert > r1["suppression_window"]:
-                    targets = list(set([x[1] for x in self.state[ip]["failed"]]))
-                    evidence = [x[3] for x in self.state[ip]["failed"]]
+            fails = self.state.get_events(ip, "Failure", r1["time_window"])
+            if len(fails) >= r1["threshold"]:
+                if self.state.check_and_set_cooldown(ip, "R001", r1["suppression_window"]):
                     alerts_to_fire.append({
-                        "rule": r1,
-                        "ip": ip,
-                        "targets": targets,
-                        "evidence": evidence,
-                        "event_ts": self.watermark
+                        "rule": r1, "ip": ip, "event_ts": watermark,
+                        "targets": list(set([x[1] for x in fails])),
+                        "evidence": [x[3] for x in fails]
                     })
-                    if ip not in self.last_alerted: self.last_alerted[ip] = {}
-                    self.last_alerted[ip]["R001"] = self.watermark
-
-        # Rule 2: Successful Compromise
+                    
         r2 = self.rules.get("R002")
-        if r2 and status == "success":
-            fails = [x for x in self.state[ip]["failed"] if self.watermark - x[0] <= r2["time_window"]]
+        if r2 and status == "Success":
+            fails = self.state.get_events(ip, "Failure", r2["time_window"])
             if len(fails) >= r2["threshold"]:
-                last_alert = self.last_alerted.get(ip, {}).get("R002", 0)
-                if self.watermark - last_alert > r2["suppression_window"]:
-                    targets = list(set([x[1] for x in fails] + [user]))
-                    evidence = [x[3] for x in fails] + [log_entry]
+                if self.state.check_and_set_cooldown(ip, "R002", r2["suppression_window"]):
                     alerts_to_fire.append({
-                        "rule": r2,
-                        "ip": ip,
-                        "targets": targets,
-                        "evidence": evidence,
-                        "event_ts": self.watermark
+                        "rule": r2, "ip": ip, "event_ts": watermark,
+                        "targets": list(set([x[1] for x in fails] + [user])),
+                        "evidence": [x[3] for x in fails] + [ocsf_event["raw_data"]]
                     })
-                    if ip not in self.last_alerted: self.last_alerted[ip] = {}
-                    self.last_alerted[ip]["R002"] = self.watermark
                     
         return alerts_to_fire
         
-    def sweep_global_state(self):
-        """Sweeps stale memory using the event-time watermark, NOT wall clock."""
-        ips = list(self.state.keys())
-        for ip in ips:
-            # Assume max lookback window across all rules is 60s
-            max_window = 60
-            valid_fails = [x for x in self.state[ip]["failed"] if self.watermark - x[0] <= max_window]
-            valid_success = [x for x in self.state[ip]["success"] if self.watermark - x[0] <= max_window]
-            
-            self.state[ip]["failed"] = valid_fails
-            self.state[ip]["success"] = valid_success
-            
-            if not valid_fails and not valid_success:
-                # Check cooldowns
-                safe_to_delete = True
-                if ip in self.last_alerted:
-                    for rule_id, last_ts in self.last_alerted[ip].items():
-                        if self.watermark - last_ts <= 120: # max global suppression
-                            safe_to_delete = False
-                            break
-                if safe_to_delete:
-                    del self.state[ip]
-                    if ip in self.last_alerted:
-                        del self.last_alerted[ip]
-        
-    def get_active_threat_count(self):
-        return len([ip for ip, data in self.state.items() if len(data["failed"]) > 0])
+    def sweep(self):
+        self.state.sweep(60, 120)
+        ACTIVE_THREATS.set(self.state.get_active_count())
 
-
-def parse_log(log_line):
-    try:
-        return json.loads(log_line)
-    except (json.JSONDecodeError, TypeError):
-        LOGS_MALFORMED.inc()
-        return None
-
-def write_alert(alert):
-    alert_id = f"ALERT-{alert['rule']['id']}-{uuid.uuid4()}"
-    rule = alert['rule']
+def main():
+    print(f"Starting Prometheus endpoint on port {Config.METRICS_PORT}...")
+    start_http_server(Config.METRICS_PORT)
     
-    # Calculate MTTD (Wall clock time - max Event Time)
-    wall_clock = time.time()
-    mttd_val = wall_clock - alert['event_ts']
-    if mttd_val < 0: mttd_val = 0
-    MTTD.observe(mttd_val)
-    
-    alert_data = {
-        "alert_id": alert_id,
-        "rule_id": rule['id'],
-        "severity": rule['severity'],
-        "mitre_attack": rule.get('mitre_attack', 'Unknown'),
-        "title": rule['name'],
-        "source_ip": alert['ip'],
-        "targeted_users": alert['targets'],
-        "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-        "evidence": alert['evidence'],
-        "triage_steps": [
-            "1. Verify if the source IP is known or trusted.",
-            "2. Review the raw evidence payload attached to this alert.",
-            "3. Block IP or force password reset if malicious."
-        ]
-    }
-    
-    alert_filepath = os.path.join(ALERT_DIR, f"{alert_id}.json")
-    with open(alert_filepath, "w") as f:
-        json.dump(alert_data, f, indent=4)
-        
-    print(f"[!] {rule['severity']} ALERT GENERATED: {alert_id} ({rule['name']})")
-
-
-def robust_tail(filepath, backfill=False):
-    """Tails log file. Yields None as a heartbeat when idle."""
-    if not os.path.exists(filepath):
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        open(filepath, 'a').close()
-        
-    with open(filepath, "r") as f:
-        if not backfill:
-            f.seek(0, 2)
-            
-        last_inode = os.stat(filepath).st_ino
-        last_size = os.stat(filepath).st_size
-        
-        while running:
-            line = f.readline()
-            if not line:
-                try:
-                    stat = os.stat(filepath)
-                    if stat.st_ino != last_inode or stat.st_size < last_size:
-                        print(f"[*] Log rotation detected for {filepath}, reopening...")
-                        break
-                    last_size = stat.st_size
-                except FileNotFoundError:
-                    break
-                    
-                time.sleep(0.5)
-                yield None # Fix 3: Heartbeat prevents loop blocking
-                continue
-            yield line
-
-
-if __name__ == "__main__":
-    if not os.path.exists(ALERT_DIR):
-        os.makedirs(ALERT_DIR)
-        
-    print("Starting Prometheus metrics endpoint on port 8002...")
-    start_http_server(8002)
-    
-    detector = DetectionEngine(RULES_FILE)
-    
-    print(f"[*] Starting SIEM Engine...")
-    print(f"[*] Monitoring {LOG_FILE} for suspicious activity...\n")
+    state_backend = MemoryState()
+    source = FileSource(Config.LOG_FILE)
+    sink = FileSink(Config.ALERT_DIR)
+    parser = MockParser()
+    detector = DetectionEngine(Config.RULES_FILE, state_backend)
     
     last_sweep = time.time()
     
-    while running:
-        for line in robust_tail(LOG_FILE, backfill=False):
-            if not running:
-                break
-                
-            if line is not None:
-                log_dict = parse_log(line)
-                if log_dict:
-                    LOGS_PROCESSED.inc()
-                    alerts = detector.evaluate(log_dict)
-                    
-                    if alerts:
-                        for alert in alerts:
-                            ALERTS_GENERATED.labels(severity=alert['rule']['severity']).inc()
-                            write_alert(alert)
+    for line in source.read_events():
+        if not running:
+            source.running = False
+            break
             
-            # The loop runs every 0.5s even if idle due to 'yield None'
-            now = time.time()
-            if now - last_sweep > 10:
-                detector.sweep_global_state()
-                ACTIVE_THREATS.set(detector.get_active_threat_count())
-                last_sweep = now
+        if line is not None:
+            ocsf_event = parser.parse(line)
+            if not ocsf_event:
+                LOGS_MALFORMED.inc()
+                continue
                 
-        if running:
-            time.sleep(1) 
+            LOGS_PROCESSED.inc()
+            alerts = detector.evaluate(ocsf_event)
             
-    print("SIEM Engine exited gracefully.")
-    sys.exit(0)
+            for alert in alerts:
+                ALERTS_GENERATED.labels(severity=alert['rule']['severity']).inc()
+                
+                wall_clock = time.time()
+                mttd_val = max(0, wall_clock - alert['event_ts'])
+                MTTD.observe(mttd_val)
+                
+                alert_id = f"ALERT-{alert['rule']['id']}-{uuid.uuid4()}"
+                alert_payload = {
+                    "alert_id": alert_id,
+                    "rule_id": alert['rule']['id'],
+                    "severity": alert['rule']['severity'],
+                    "mitre_attack": alert['rule'].get('mitre_attack', 'Unknown'),
+                    "title": alert['rule']['name'],
+                    "source_ip": alert['ip'],
+                    "targeted_users": alert['targets'],
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+                    "evidence": alert['evidence'],
+                }
+                sink.write_alert(alert_payload)
+                
+        now = time.time()
+        if now - last_sweep > 10:
+            detector.sweep()
+            last_sweep = now
+
+if __name__ == "__main__":
+    main()

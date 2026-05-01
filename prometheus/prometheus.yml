@@ -1,18 +1,15 @@
 global:
-  scrape_interval: 2s # Scrape frequently for our fast-paced simulation
+  scrape_interval: 5s
 
 rule_files:
-  - 'alert.rules.yml'
+  - "alert.rules.yml"
 
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: ['alertmanager:9093']
+        - targets: ['siem_alertmanager:9093']
 
 scrape_configs:
   - job_name: 'siem_mock_environment'
     static_configs:
-      - targets: 
-        # Port 8001 = log_generator, Port 8002 = siem_engine
-        - 'host.docker.internal:8001'
-        - 'host.docker.internal:8002'
+      - targets: ['siem_generator:8001', 'siem_engine:8002']

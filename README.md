@@ -1,64 +1,91 @@
-# Mock SIEM Alerting and Triage Pipeline
+# Cloud-Agnostic SIEM Detection & Alerting Pipeline
 
-A functional SIEM pipeline that covers log ingestion, stateful detection, alerting, and observability. It uses Prometheus, Grafana, and Alertmanager.
+A modular, containerized Security Information and Event Management (SIEM) pipeline. It normalizes disparate authentication logs into the Open Cybersecurity Schema Framework (OCSF), evaluates them against YAML-based detection rules in real-time, and routes critical events through a Prometheus and Alertmanager stack.
 
-## Core Features
-- **Log Parsing**: Parses and normalizes raw JSON authentication logs.
-- **Detection Engine**: Detects brute-force attacks across sliding time windows using a Python backend. *(Note: State is kept in-memory for this simulation. Production scaling beyond 1 replica would require a shared state backend like Redis).*
-- **Alert Routing**: Forwards critical events to a mock webhook receiver via Alertmanager.
-- **Observability**: Exposes metrics to Prometheus and provides a Grafana dashboard for real-time traffic monitoring.
-- **Testing**: Includes a pytest suite covering time boundaries, state cleanup, and log validation.
+## What is this?
+This project is an end-to-end event processing engine. It reads raw logs, translates them to a standardized schema (OCSF Class 3002), tracks state across sliding event-time windows, and triggers actionable alerts. 
 
-## Prerequisites
-- Python 3
-- Docker and Docker Compose
+The stack includes:
+- A stateless Python detection engine.
+- Detections-as-code (`rules.yml`) mapped to MITRE ATT&CK techniques.
+- Prometheus for metric scraping and deadman-switch monitoring.
+- Alertmanager for severity-based webhook routing and alert inhibition.
+- Grafana for visual observability and MTTD (Mean Time to Detect) tracking.
 
-## Setup
+## Why build this?
+Alert monitoring dictates the actual effectiveness of a security posture. A Security Operations Center (SOC) fails if alerts are noisy or drop silently during infrastructure outages. 
 
-Install the Python requirements:
+This pipeline solves specific engineering problems inherent to threat detection:
+- **Event-time vs. Wall-clock:** Cloud logs lag. This engine uses high-watermark event-time tracking to ensure delayed logs correctly trigger sliding-window thresholds without being prematurely swept from memory.
+- **Idempotency:** Cloud queues guarantee at-least-once delivery. The engine deduplicates payloads via `event_id` to prevent false positives from message replays.
+- **Self-Monitoring:** If the detection engine crashes, Prometheus catches the missing metrics and Alertmanager fires a "Blind SOC" critical alert.
+
+## Where does this run?
+Anywhere. The architecture is cloud-agnostic and follows 12-factor application principles. 
+- All components are Dockerized.
+- State is abstracted. The current implementation uses memory, but the `BaseState` interface allows dropping in a Redis backend for horizontal scaling across Kubernetes replica sets.
+- Configuration is driven entirely by environment variables. There are no hardcoded host paths or local dependencies.
+
+## When should you use this?
+Deploy or adapt this architecture when you need vendor-agnostic detection engineering. It allows security teams to:
+- Write complex correlation rules (e.g., successful login immediately following a brute-force burst) without relying on proprietary SIEM query languages.
+- Prevent vendor lock-in by normalizing logs to OCSF before applying logic.
+- Route alerts dynamically based on severity.
+
+## How to adapt it for your environment
+The code relies on dependency injection. You can adapt it to any cloud provider by implementing the provided abstract base classes:
+
+1. **New Log Sources:** Write a class inheriting `BaseSource` to pull from AWS Kinesis or GCP Pub/Sub instead of local files.
+2. **New Schemas:** Write a class inheriting `BaseParser` to map CloudTrail `ConsoleLogin` or Azure AD `SignInLogs` into the OCSF format. The detection rules will work immediately without modification.
+3. **Distributed State:** Write a `RedisState` class inheriting `BaseState` to share sliding-window memory across multiple detection engine pods.
+
+## How to run the local simulation
+
+Start the entire environment (Engine, Generator, Prometheus, Grafana, Alertmanager, and Webhook Receiver):
 ```bash
-pip install -r requirements.txt
+docker-compose up -d --build
 ```
 
-Start the monitoring stack:
-```bash
-docker-compose up -d
-```
-
-## Running the Engine
-
-You need two terminals.
-
-Terminal 1 runs the log generator on port 8001:
-```bash
-python3 log_generator.py
-```
-
-Terminal 2 runs the SIEM engine on port 8002:
-```bash
-python3 siem_engine.py
-```
-
-## Viewing Dashboards
-
-The project sets up a Grafana dashboard automatically.
-
-1. Go to `http://localhost:3000`
-2. Login with `admin` / `admin`
-3. Click **Dashboards** > **Browse** and open the **SIEM Observability Overview** board.
-
-## Alerting
-
-When the SIEM engine triggers a rule, it drops a JSON file into the `alerts/` folder. Prometheus then evaluates the metric spikes against its rule file (`alert.rules.yml`) and passes the state to Alertmanager.
-
-Alertmanager routes the payload to a local webhook receiver. Watch the alerts arrive in real time:
+Watch the mock webhook receiver for triggered alerts:
 ```bash
 docker logs -f siem_webhook_receiver
 ```
 
-## Running Tests
+Open the observability dashboard:
+1. Navigate to `http://localhost:3000`
+2. Login with `admin` / `admin`
+3. View the **SIEM Observability Overview** dashboard to watch real-time alert volumes and parsing metrics.
 
-Run the test suite to verify the detection logic:
+To test the deadman switch (Blind SOC fallback):
 ```bash
-python3 -m pytest tests/
+docker stop siem_engine
 ```
+Within 15 seconds, the `SIEMComponentDown` alert will trigger and route to the webhook receiver.
+
+## Architectural Pitfalls & Lessons Learned
+
+Building a SIEM that survives the realities of cloud-native log ingestion, network latency, and distributed queues requires defensive engineering. Here are the core problems this architecture solves:
+
+### 1. The Clock Domain Fallacy (Event-Time vs. Wall-Clock)
+**The Trap:** Relying on the host's `time.time()` to measure sliding windows for alerts. Cloud logs (AWS CloudTrail, Azure AD, GCP Audit) routinely lag by minutes or hours. 
+**The Fix:** The engine implements **high-watermark tracking**. The clock only advances based on the maximum timestamp extracted from the event stream itself, completely decoupled from the host's physical clock.
+
+### 2. Watermark Poisoning (NTP Desyncs)
+**The Trap:** A single rogue endpoint with a broken NTP clock sends a log timestamped 2 hours in the future. The watermark jumps forward, triggering a global sweep that silently wipes all state and kills active attack detections.
+**The Fix:** **Max-Skew Bounding**. The engine rejects and metrics logs possessing future timestamps beyond a 1-hour clock-skew tolerance before they can poison the watermark.
+
+### 3. Idempotency & The Wholesale Flush
+**The Trap:** Handling duplicate deliveries from at-least-once queues (SQS / PubSub) using a basic set, and wiping the set when it hits a memory limit. Replays arriving immediately after the flush sail through as false positives.
+**The Fix:** A **Bounded LRU Cache** (`OrderedDict`). When the cache hits 10,000 events, it safely drops only the oldest `event_id` rather than destroying the entire deduplication history.
+
+### 4. Housekeeping Starvation
+**The Trap:** Placing memory cleanup logic at the bottom of a log-processing loop. If a steady stream of malformed logs triggers `continue` statements, the sweep never executes and the engine OOMs.
+**The Fix:** Housekeeping tasks are hoisted above conditional logic to guarantee execution every 10 seconds regardless of stream health.
+
+### 5. False "Detections-as-Code"
+**The Trap:** Moving thresholds to a YAML file but keeping rule IDs hardcoded in Python (`if rule_id == "R001":`). Adding a new rule does nothing.
+**The Fix:** The engine dynamically dispatches based on rule `type` (`threshold` or `sequence`). Adding new detections requires zero code changes.
+
+### 6. Sequence Rule False Positives (NAT Gateways)
+**The Trap:** Triggering a "Successful Compromise" alert when an IP successfully logs in immediately after a brute-force burst. In enterprise environments, thousands of users route through the same NAT Gateway IP, leading to massive false positives.
+**The Fix:** Sequence detections strictly correlate targets. The successful login must be evaluated against the specific `targeted_users` subset collected during the failure window.

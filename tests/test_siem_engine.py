@@ -2,9 +2,10 @@ import pytest
 import os
 import uuid
 from datetime import datetime
-from siem_engine import DetectionEngine, parse_log
+from siem_engine import DetectionEngine
+from src.state.memory import MemoryState
+from src.parsers.mock import MockParser
 
-# Create a mock rules file for testing
 RULES_CONTENT = """
 rules:
   - id: "R001"
@@ -27,89 +28,85 @@ def setup_rules(tmp_path):
     rules_file.write_text(RULES_CONTENT)
     return str(rules_file)
 
-def test_parse_log_valid():
-    """Test valid JSON log parsing."""
-    log_line = '{"event_type": "authentication", "status": "failed", "event_id": "123"}'
-    result = parse_log(log_line)
-    assert result["status"] == "failed"
+@pytest.fixture
+def parser():
+    return MockParser()
 
-def test_parse_log_malformed():
+@pytest.fixture
+def detector(setup_rules):
+    state = MemoryState()
+    return DetectionEngine(setup_rules, state)
+
+def test_parse_log_valid(parser):
+    """Test valid JSON log parsing into OCSF schema."""
+    log_line = '{"event_type": "authentication", "status": "failed", "event_id": "123", "source_ip": "10.0.0.1", "user": "admin", "timestamp": "2026-07-24T10:00:00Z"}'
+    result = parser.parse(log_line)
+    assert result["status"] == "Failure"
+    assert result["src_endpoint"]["ip"] == "10.0.0.1"
+
+def test_parse_log_malformed(parser):
     """Test handling of malformed JSON strings."""
     log_line = '{"event_type": "authentication", "status": "fail'
-    result = parse_log(log_line)
+    result = parser.parse(log_line)
     assert result is None
 
-def test_detector_idempotency(setup_rules):
+def test_detector_idempotency(detector, parser):
     """Test that duplicate events are ignored."""
-    detector = DetectionEngine(setup_rules)
     event_id = str(uuid.uuid4())
-    log_dict = {"event_id": event_id, "event_type": "authentication", "status": "failed", "source_ip": "1.2.3.4", "user": "admin", "timestamp": "2026-07-24T10:00:00Z"}
+    log_line = f'{{"event_id": "{event_id}", "event_type": "authentication", "status": "failed", "source_ip": "1.2.3.4", "user": "admin", "timestamp": "2026-07-24T10:00:00Z"}}'
     
-    # Send it 4 times
-    assert detector.evaluate(log_dict) == []
-    assert detector.evaluate(log_dict) is None
-    assert detector.evaluate(log_dict) is None
-    assert detector.evaluate(log_dict) is None
+    ocsf_event = parser.parse(log_line)
     
-    # State should only have 1 entry
-    assert len(detector.state["1.2.3.4"]["failed"]) == 1
+    assert detector.evaluate(ocsf_event) == []
+    assert detector.evaluate(ocsf_event) == []
+    assert detector.evaluate(ocsf_event) == []
+    assert detector.evaluate(ocsf_event) == []
+    
+    assert len(detector.state.state["1.2.3.4"]["Failure"]) == 1
 
-def test_detector_threshold_boundary(setup_rules):
-    """Test that the threshold boundary (3 vs 4) is respected."""
-    detector = DetectionEngine(setup_rules)
+def test_detector_threshold_boundary(detector, parser):
+    """Test that the threshold boundary is respected."""
     ip = "10.0.0.1"
     
-    detector.evaluate({"event_id": str(uuid.uuid4()), "status": "failed", "source_ip": ip, "user": "admin", "timestamp": "2026-07-24T10:00:00Z"})
-    detector.evaluate({"event_id": str(uuid.uuid4()), "status": "failed", "source_ip": ip, "user": "admin", "timestamp": "2026-07-24T10:00:01Z"})
-    alerts = detector.evaluate({"event_id": str(uuid.uuid4()), "status": "failed", "source_ip": ip, "user": "admin", "timestamp": "2026-07-24T10:00:02Z"})
-    assert len(alerts) == 1
-
-    # Ah, I set threshold to 3, and len >= 3 triggers it. So 3rd attempt triggers it!
-    # Let's adjust test to expect trigger on 3rd attempt.
+    e1 = parser.parse(f'{{"event_id": "{uuid.uuid4()}", "status": "failed", "source_ip": "{ip}", "user": "admin", "timestamp": "2026-07-24T10:00:00Z"}}')
+    e2 = parser.parse(f'{{"event_id": "{uuid.uuid4()}", "status": "failed", "source_ip": "{ip}", "user": "admin", "timestamp": "2026-07-24T10:00:01Z"}}')
+    e3 = parser.parse(f'{{"event_id": "{uuid.uuid4()}", "status": "failed", "source_ip": "{ip}", "user": "admin", "timestamp": "2026-07-24T10:00:02Z"}}')
     
-def test_detector_brute_force_rule(setup_rules):
-    detector = DetectionEngine(setup_rules)
-    ip = "10.0.0.5"
+    detector.evaluate(e1)
+    detector.evaluate(e2)
+    alerts = detector.evaluate(e3)
     
-    detector.evaluate({"event_id": str(uuid.uuid4()), "status": "failed", "source_ip": ip, "user": "admin", "timestamp": "2026-07-24T10:00:00Z"})
-    detector.evaluate({"event_id": str(uuid.uuid4()), "status": "failed", "source_ip": ip, "user": "admin", "timestamp": "2026-07-24T10:00:01Z"})
-    
-    # 3rd failed attempt should trigger R001
-    alerts = detector.evaluate({"event_id": str(uuid.uuid4()), "status": "failed", "source_ip": ip, "user": "admin", "timestamp": "2026-07-24T10:00:02Z"})
     assert len(alerts) == 1
     assert alerts[0]["rule"]["id"] == "R001"
     
-def test_detector_compromise_rule(setup_rules):
-    detector = DetectionEngine(setup_rules)
+def test_detector_compromise_rule(detector, parser):
+    """Test that a successful login following brute force triggers a compromise alert."""
     ip = "10.0.0.6"
     
-    # 3 failed attempts
     for i in range(3):
-        detector.evaluate({"event_id": str(uuid.uuid4()), "status": "failed", "source_ip": ip, "user": "admin", "timestamp": f"2026-07-24T10:00:0{i}Z"})
+        e = parser.parse(f'{{"event_id": "{uuid.uuid4()}", "status": "failed", "source_ip": "{ip}", "user": "admin", "timestamp": "2026-07-24T10:00:0{i}Z"}}')
+        detector.evaluate(e)
         
-    # 1 success attempt immediately after
-    alerts = detector.evaluate({"event_id": str(uuid.uuid4()), "status": "success", "source_ip": ip, "user": "admin", "timestamp": "2026-07-24T10:00:05Z"})
+    e_success = parser.parse(f'{{"event_id": "{uuid.uuid4()}", "status": "success", "source_ip": "{ip}", "user": "admin", "timestamp": "2026-07-24T10:00:05Z"}}')
+    alerts = detector.evaluate(e_success)
     
-    # Should trigger R002 (Compromise)
     assert len(alerts) == 1
     assert alerts[0]["rule"]["id"] == "R002"
     assert alerts[0]["targets"] == ["admin"]
 
-def test_detector_watermark_sweep(setup_rules):
+def test_detector_watermark_sweep(detector, parser):
     """Test that sweep uses event watermark, not wall clock."""
-    detector = DetectionEngine(setup_rules)
     ip = "10.0.0.4"
     
-    detector.evaluate({"event_id": str(uuid.uuid4()), "status": "failed", "source_ip": ip, "user": "admin", "timestamp": "2026-07-24T10:00:00Z"})
-    assert len(detector.state[ip]["failed"]) == 1
+    e1 = parser.parse(f'{{"event_id": "{uuid.uuid4()}", "status": "failed", "source_ip": "{ip}", "user": "admin", "timestamp": "2026-07-24T10:00:00Z"}}')
+    detector.evaluate(e1)
+    assert len(detector.state.state[ip]["Failure"]) == 1
     
-    # Sweep now. Watermark is at 10:00:00. State should NOT be cleared because window is 60s.
-    detector.sweep_global_state()
-    assert len(detector.state[ip]["failed"]) == 1
+    detector.sweep()
+    assert len(detector.state.state[ip]["Failure"]) == 1
     
-    # Process event 100 seconds later. Watermark advances.
-    detector.evaluate({"event_id": str(uuid.uuid4()), "status": "success", "source_ip": "10.0.0.9", "user": "bob", "timestamp": "2026-07-24T10:01:40Z"})
+    e2 = parser.parse(f'{{"event_id": "{uuid.uuid4()}", "status": "success", "source_ip": "10.0.0.9", "user": "bob", "timestamp": "2026-07-24T10:01:40Z"}}')
+    detector.evaluate(e2)
     
-    # Sweep now. The 10:00:00 event should be pruned from state.
-    detector.sweep_global_state()
-    assert ip not in detector.state
+    detector.sweep()
+    assert ip not in detector.state.state
