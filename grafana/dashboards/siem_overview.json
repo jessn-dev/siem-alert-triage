@@ -1,12 +1,20 @@
 {
   "title": "SIEM Observability Overview",
-  "tags": ["siem", "security"],
+  "tags": [
+    "siem",
+    "security"
+  ],
   "timezone": "browser",
   "panels": [
     {
       "type": "timeseries",
       "title": "Authentication Logs Generated (Rate)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
         {
           "expr": "rate(mock_logs_generated_total[1m])",
@@ -17,7 +25,12 @@
     {
       "type": "stat",
       "title": "Active Tracked IPs",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
         {
           "expr": "siem_active_tracked_ips",
@@ -28,11 +41,65 @@
     {
       "type": "timeseries",
       "title": "SIEM Alerts Generated",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
       "targets": [
         {
           "expr": "siem_alerts_generated_total",
           "legendFormat": "Alerts Fired"
+        }
+      ]
+    },
+    {
+      "type": "heatmap",
+      "title": "Mean Time To Detect (MTTD)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(siem_mttd_seconds_bucket[1m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Malformed Logs (Rate)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "rate(siem_logs_malformed_total[1m])",
+          "legendFormat": "Malformed Rate"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Alerts by Rule ID",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "sum(siem_alerts_generated_total) by (rule_id)",
+          "legendFormat": "{{rule_id}}"
         }
       ]
     }

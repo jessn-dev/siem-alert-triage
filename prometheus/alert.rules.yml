@@ -11,9 +11,17 @@ groups:
           summary: "High volume of SIEM alerts generated"
           description: "The SIEM engine is generating alerts rapidly, indicating an ongoing attack or noisy rule."
           
+      - alert: CriticalSIEMDetection
+        expr: increase(siem_alerts_generated_total{severity="CRITICAL"}[1m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical SIEM Detection Triggered"
+          description: "A CRITICAL severity detection rule was triggered."
+
       - alert: MalformedLogsSpike
         # Fix 2: Alert on parsing failures
-        expr: rate(siem_logs_malformed_total[1m]) > 0
+        expr: increase(siem_logs_malformed_total[5m]) > 10
         for: 15s
         labels:
           severity: warning

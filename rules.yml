@@ -1,11 +1,17 @@
+global_tuning:
+  allowlisted_ips:
+    - "10.0.0.254" # vulnerability scanner
+  allowlisted_users:
+    - "healthcheck_service"
+
 rules:
   - id: "R001"
     name: "Potential Brute Force Attack"
     description: "Detects multiple failed login attempts from a single IP within a short time window."
     type: "threshold"
     mitre_attack: "T1110.001"
-    severity: "MEDIUM"
-    threshold: 3
+    base_risk: 40
+    threshold: 5
     time_window: 30
     suppression_window: 60
 
@@ -14,7 +20,17 @@ rules:
     description: "Detects a successful login from an IP immediately following a series of failed attempts against the same user account."
     type: "sequence"
     mitre_attack: "T1078"
-    severity: "CRITICAL"
+    base_risk: 80
     threshold: 3
+    time_window: 60
+    suppression_window: 120
+
+  - id: "R003"
+    name: "Password Spraying Attack"
+    description: "Detects a single IP attempting to log into many different accounts."
+    type: "spray"
+    mitre_attack: "T1110.003"
+    base_risk: 60
+    unique_targets: 4
     time_window: 60
     suppression_window: 120

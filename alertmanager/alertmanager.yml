@@ -18,8 +18,8 @@ inhibit_rules:
   # Fix 3: Suppress HighAlertVolume noise when the entire SIEM is down
   - source_match:
       alertname: 'SIEMComponentDown'
-    target_match:
-      alertname: 'HighAlertVolume'
+    target_match_re:
+      alertname: 'HighAlertVolume|MalformedLogsSpike'
     equal: ['job']
 
 receivers:

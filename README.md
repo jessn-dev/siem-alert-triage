@@ -89,3 +89,19 @@ Building a SIEM that survives the realities of cloud-native log ingestion, netwo
 ### 6. Sequence Rule False Positives (NAT Gateways)
 **The Trap:** Triggering a "Successful Compromise" alert when an IP successfully logs in immediately after a brute-force burst. In enterprise environments, thousands of users route through the same NAT Gateway IP, leading to massive false positives.
 **The Fix:** Sequence detections strictly correlate targets. The successful login must be evaluated against the specific `targeted_users` subset collected during the failure window.
+
+### 7. The Password Spray vs. Brute Force Distinction
+**The Trap:** Treating a Password Spray (T1110.003) as just another volume-based brute force threshold. A slow spray that tries one password across 50 different accounts often evades standard velocity thresholds.
+**The Fix:** Engineered a distinct `spray` rule type in the engine that tracks and evaluates `unique_targets` per IP, detecting lateral credential testing regardless of failure volume.
+
+### 8. Static Severity & Alert Fatigue
+**The Trap:** Hardcoding a `CRITICAL` severity directly to a YAML rule. A brute force attack against a low-privilege guest account shouldn't page the on-call engineer, but the same attack against a root account should.
+**The Fix:** Implemented a **Dynamic Risk Engine** that derives the final severity by enriching the log at runtime with mock GeoIP data and Asset Criticality context.
+
+### 9. Prometheus Sparse Metric Oversensitivity
+**The Trap:** Using `rate() > 0` to detect malformed logs. The `rate()` function extrapolates data; a single malformed log in a 5-minute window causes a mathematical spike that triggers false alerts.
+**The Fix:** Transitioned sparse, event-driven rules to `increase(...[5m]) > 10`, ensuring only statistically significant anomalies are forwarded to Alertmanager.
+
+### 10. The Deadman Switch Inhibition Failure
+**The Trap:** When the SIEM container crashes, it stops generating metrics. The monitoring layer fires a "Component Down" alert, but often fires downstream alerts (like "High Alert Volume") based on stale metric extrapolation, causing a pager storm.
+**The Fix:** Configured strict `inhibit_rules` in Alertmanager. The `SIEMComponentDown` alert acts as a master suppression switch, instantly muting all downstream metric-based alerts when the parent job dies.
