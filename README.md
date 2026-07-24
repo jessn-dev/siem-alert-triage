@@ -1,66 +1,51 @@
+<div align="center">
+
+  [![CI](https://github.com/jessn-dev/siem-alert-triage/actions/workflows/ci.yml/badge.svg)](https://github.com/jessn-dev/siem-alert-triage/actions/workflows/ci.yml)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+  [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/release/python-3130/)
+  [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
+</div>
+
 # Cloud-Agnostic SIEM Detection & Alerting Pipeline
 
-A modular, containerized Security Information and Event Management (SIEM) pipeline. It normalizes disparate authentication logs into the Open Cybersecurity Schema Framework (OCSF), evaluates them against YAML-based detection rules in real-time, and routes critical events through a Prometheus and Alertmanager stack.
+A modular, containerized Security Information and Event Management (SIEM) pipeline built for modern cloud infrastructures. It normalizes disparate authentication logs into the Open Cybersecurity Schema Framework (OCSF), evaluates them against YAML-based detection rules in real-time, and securely routes critical events through a robust Prometheus and Alertmanager stack.
 
-## What is this?
-This project is an end-to-end event processing engine. It reads raw logs, translates them to a standardized schema (OCSF Class 3002), tracks state across sliding event-time windows, and triggers actionable alerts. 
+## ✨ Feature Highlights
 
-The stack includes:
-- A stateless Python detection engine.
-- Detections-as-code (`rules.yml`) mapped to MITRE ATT&CK techniques.
-- Prometheus for metric scraping and deadman-switch monitoring.
-- Alertmanager for severity-based webhook routing and alert inhibition.
-- Grafana for visual observability and MTTD (Mean Time to Detect) tracking.
+- 🛡️ **OCSF Normalization**: Ingests raw AWS CloudTrail or mock JSON logs and normalizes them strictly to OCSF v1.1.0 (Class 3002).
+- 🧩 **Detections-as-Code**: YAML-defined threshold and sequence rules mapped directly to MITRE ATT&CK techniques.
+- ⚡ **Dynamic Risk Scoring**: Real-time log enrichment with mock GeoIP and asset criticality for adaptive alert severities.
+- 📡 **Cloud-Agnostic I/O**: Driven by a factory pattern utilizing stateless HTTP Webhooks and Redis-ready memory, bypassing rigid file mounts.
+- 🚨 **Blind SOC Protection**: Automated Prometheus deadman-switches and Alertmanager inhibit rules to prevent alert storms during container crashes.
+- 📊 **Observability Ready**: Pre-configured Grafana dashboards for tracking MTTD (Mean Time To Detect) and real-time alert volumes.
 
-## Why build this?
-Alert monitoring dictates the actual effectiveness of a security posture. A Security Operations Center (SOC) fails if alerts are noisy or drop silently during infrastructure outages. 
+## 🚀 Quick Start Guide
 
-This pipeline solves specific engineering problems inherent to threat detection:
-- **Event-time vs. Wall-clock:** Cloud logs lag. This engine uses high-watermark event-time tracking to ensure delayed logs correctly trigger sliding-window thresholds without being prematurely swept from memory.
-- **Idempotency:** Cloud queues guarantee at-least-once delivery. The engine deduplicates payloads via `event_id` to prevent false positives from message replays.
-- **Self-Monitoring:** If the detection engine crashes, Prometheus catches the missing metrics and Alertmanager fires a "Blind SOC" critical alert.
+Deploy the entire mock infrastructure—including the SIEM engine, log generator, Prometheus, Grafana, and Alertmanager—in a single command.
 
-## Where does this run?
-Anywhere. The architecture is cloud-agnostic and follows 12-factor application principles. 
-- All components are Dockerized.
-- State is abstracted. The current implementation uses memory, but the `BaseState` interface allows dropping in a Redis backend for horizontal scaling across Kubernetes replica sets.
-- Configuration is driven entirely by environment variables. There are no hardcoded host paths or local dependencies.
-
-## When should you use this?
-Deploy or adapt this architecture when you need vendor-agnostic detection engineering. It allows security teams to:
-- Write complex correlation rules (e.g., successful login immediately following a brute-force burst) without relying on proprietary SIEM query languages.
-- Prevent vendor lock-in by normalizing logs to OCSF before applying logic.
-- Route alerts dynamically based on severity.
-
-## How to adapt it for your environment
-The code relies on dependency injection. You can adapt it to any cloud provider by implementing the provided abstract base classes:
-
-1. **New Log Sources:** Write a class inheriting `BaseSource` to pull from AWS Kinesis or GCP Pub/Sub instead of local files.
-2. **New Schemas:** Write a class inheriting `BaseParser` to map CloudTrail `ConsoleLogin` or Azure AD `SignInLogs` into the OCSF format. The detection rules will work immediately without modification.
-3. **Distributed State:** Write a `RedisState` class inheriting `BaseState` to share sliding-window memory across multiple detection engine pods.
-
-## How to run the local simulation
-
-Start the entire environment (Engine, Generator, Prometheus, Grafana, Alertmanager, and Webhook Receiver):
 ```bash
+# 1. Clone the repository
+git clone https://github.com/jessn-dev/siem-alert-triage.git
+cd siem-alert-triage
+
+# 2. Start the containerized stack
 docker-compose up -d --build
-```
 
-Watch the mock webhook receiver for triggered alerts:
-```bash
+# 3. Watch the mock webhook receiver for triggered alerts
 docker logs -f siem_webhook_receiver
 ```
 
-Open the observability dashboard:
-1. Navigate to `http://localhost:3000`
-2. Login with `admin` / `admin`
-3. View the **SIEM Observability Overview** dashboard to watch real-time alert volumes and parsing metrics.
+**Access the Dashboards:**
+- Navigate to `http://localhost:3000` (Login: `admin` / `admin`) to view the SIEM Observability Overview.
 
-To test the deadman switch (Blind SOC fallback):
-```bash
-docker stop siem_engine
-```
-Within 15 seconds, the `SIEMComponentDown` alert will trigger and route to the webhook receiver.
+## 🛠️ Tech Stack
+
+![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
+![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
+![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=Prometheus&logoColor=white)
+![Grafana](https://img.shields.io/badge/grafana-%23F46800.svg?style=for-the-badge&logo=grafana&logoColor=white)
+
+---
 
 ## Architectural Pitfalls & Lessons Learned
 
@@ -105,3 +90,30 @@ Building a SIEM that survives the realities of cloud-native log ingestion, netwo
 ### 10. The Deadman Switch Inhibition Failure
 **The Trap:** When the SIEM container crashes, it stops generating metrics. The monitoring layer fires a "Component Down" alert, but often fires downstream alerts (like "High Alert Volume") based on stale metric extrapolation, causing a pager storm.
 **The Fix:** Configured strict `inhibit_rules` in Alertmanager. The `SIEMComponentDown` alert acts as a master suppression switch, instantly muting all downstream metric-based alerts when the parent job dies.
+
+### 11. The RWX Volume Trap (Host Coupling)
+**The Trap:** Relying on shared disk mounts (`volumes: - ./logs:/app/logs`) to pass data between the generator and the engine. While this works beautifully in `docker-compose` on a laptop, it completely fails in Kubernetes unless you provision expensive `ReadWriteMany` (RWX) network filesystems.
+**The Fix:** Abstracted I/O using a true Factory Pattern. The engine now seamlessly switches from a `FileSource` to an HTTP-based `WebhookSource`. The generator streams logs via HTTP POST over the container network, entirely eliminating the filesystem dependency.
+
+### 12. "Half-OCSF" is Worse Than Custom
+**The Trap:** Building a pipeline that claims OCSF compliance but uses invented string mappings (e.g. `activity_name: "Logon"`) instead of the rigid, integer-based enumerations demanded by the spec. Reviewers who know the spec instantly flag this.
+**The Fix:** Engineered full compliance with the OCSF v1.1.0 Authentication schema (`class_uid: 3002`, `activity_id: 1`, `status_id: 1/2`). We proved the engine's agnosticism by implementing a secondary `CloudTrailParser` that normalizes raw AWS JSON directly into this exact integer schema alongside the local mock parser.
+
+### 13. Docker Context Bloat & `.dockerignore`
+**The Trap:** Running `COPY . .` in a Dockerfile without a `.dockerignore`. It copies local virtual environments (`venv/`), Git histories, and gigabytes of local test logs into the image, bloating deployment times and expanding the attack surface.
+**The Fix:** Added a strict `.dockerignore` to ensure only source code is copied, keeping build contexts light and reproducible.
+
+### 14. Root Containers & Production Hygiene
+**The Trap:** Running container processes as the default `root` user. If a vulnerability exists in the Python runtime or a deserialization library, attackers gain root access to the container namespace.
+**The Fix:** Enforced non-root execution by creating a dedicated `appuser` and running the engine via `USER appuser` in the Dockerfile.
+
+### 15. The `latest` Tag Fallacy
+**The Trap:** Pinning infrastructure (Prometheus, Grafana, Alertmanager) to `:latest` in Compose or Kubernetes. An upstream update silently breaks the monitoring stack in production without warning.
+**The Fix:** Explicitly pinned all infrastructure images to stable, reproducible SHAs/tags (e.g., `prom/prometheus:v2.45.0`) and implemented explicit HTTP healthchecks to guarantee proper service startup ordering.
+
+
+## 📝 License & Usage
+
+This repository serves as an architectural showcase and portfolio project demonstrating production-grade SIEM engineering. While it is not actively seeking community contributions or pull requests, the code is open and available for educational review.
+
+This project is licensed under the [MIT License](LICENSE).

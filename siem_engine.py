@@ -124,7 +124,7 @@ class DetectionEngine:
                         })
                         
             elif rule_type == "sequence":
-                if status == "Success":
+                if status == "Success" or ocsf_event.get("status_id") == 1:
                     fails = self.state.get_events(ip, "Failure", rule["time_window"])
                     targeted_users = set([x[1] for x in fails])
                     
@@ -158,10 +158,12 @@ def main():
     print(f"Starting Prometheus endpoint on port {Config.METRICS_PORT}...")
     start_http_server(Config.METRICS_PORT)
     
-    state_backend = MemoryState()
-    source = FileSource(Config.LOG_FILE)
-    sink = FileSink(Config.ALERT_DIR)
-    parser = MockParser()
+    from src import factory
+    state_backend = factory.get_state()
+    source = factory.get_source()
+    sink = factory.get_sink()
+    parser = factory.get_parser()
+    
     detector = DetectionEngine(Config.RULES_FILE, state_backend)
     
     last_sweep = time.time()

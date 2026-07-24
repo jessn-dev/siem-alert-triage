@@ -8,3 +8,7 @@ class Config:
     STATE_BACKEND = os.getenv("SIEM_STATE_BACKEND", "memory")
     SOURCE_TYPE = os.getenv("SIEM_SOURCE_TYPE", "file")
     SINK_TYPE = os.getenv("SIEM_SINK_TYPE", "file")
+    PARSER_TYPE = os.getenv("SIEM_PARSER_TYPE", "mock")
+    SINK_WEBHOOK_URL = os.getenv("SIEM_SINK_WEBHOOK_URL", "http://localhost:8080/alerts")
+    REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))

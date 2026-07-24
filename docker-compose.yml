@@ -1,15 +1,18 @@
-version: '3.8'
-
 services:
   siem_generator:
     build:
       context: .
       dockerfile: Dockerfile.generator
     container_name: siem_generator
-    volumes:
-      - ./logs:/app/logs
+    environment:
+      - WEBHOOK_URL=http://siem_engine:8002
     ports:
       - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/metrics')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   siem_engine:
@@ -18,30 +21,41 @@ services:
       dockerfile: Dockerfile.engine
     container_name: siem_engine
     volumes:
-      - ./logs:/app/logs
       - ./alerts:/app/alerts
       - ./rules.yml:/app/rules.yml
+    environment:
+      - SIEM_SOURCE_TYPE=webhook
+      - SIEM_METRICS_PORT=8003
     ports:
       - "8002:8002"
+      - "8003:8003"
     depends_on:
-      - siem_generator
+      siem_generator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/metrics')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.45.0
     container_name: siem_prometheus
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml
-    # This allows prometheus to scrape metrics from the python apps running on your Mac host
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:10.0.3
     container_name: siem_grafana
     ports:
       - "3000:3000"
@@ -51,23 +65,23 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
     restart: unless-stopped
 
   alertmanager:
-    image: prom/alertmanager:latest
+    image: prom/alertmanager:v0.25.0
     container_name: siem_alertmanager
     ports:
       - "9093:9093"
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
     restart: unless-stopped
 
   webhook-receiver:
-    # A simple echo server that logs the HTTP POST payloads it receives.
-    # Proves knowledge of webhook routing/grouping/inhibition.
     image: mendhak/http-https-echo:32
     container_name: siem_webhook_receiver
     ports:

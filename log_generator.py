@@ -73,21 +73,31 @@ if __name__ == "__main__":
     print("Starting Prometheus metrics endpoint on port 8001...")
     start_http_server(8001)
     
-    print(f"Generating simulated auth logs into {LOG_FILE}... (Press Ctrl+C to stop)")
-    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+    webhook_url = os.getenv("WEBHOOK_URL")
     
-    while running:
-        if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > MAX_LOG_SIZE:
-            print("Log file reached 5MB limit. Truncating to simulate log rotation...")
-            open(LOG_FILE, 'w').close()
-            
+    if webhook_url:
+        import requests
+        print(f"Log generator running in webhook mode to {webhook_url}")
+        while running:
+            log_line = generate_log()
+            try:
+                requests.post(webhook_url, data=log_line.encode('utf-8'), timeout=1)
+                time.sleep(random.uniform(0.1, 0.5))
+            except Exception as e:
+                print(f"Failed to post to webhook: {e}")
+                time.sleep(2)
+    else:
+        print(f"Log generator started. Writing to {LOG_FILE}...")
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
         with open(LOG_FILE, "a") as f:
-            for _ in range(10):
-                if not running:
-                    break
-                f.write(generate_log() + "\n")
+            while running:
+                if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > MAX_LOG_SIZE:
+                    print("Log file reached 5MB limit. Truncating to simulate log rotation...")
+                    f.truncate(0)
+                log_line = generate_log()
+                f.write(log_line + "\n")
                 f.flush()
-                time.sleep(random.uniform(0.1, 1.0))
+                time.sleep(random.uniform(0.1, 0.5))
                 
     print("Log generator exited.")
     sys.exit(0)

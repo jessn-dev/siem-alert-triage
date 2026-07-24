@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: siem-engine
+  labels:
+    app: siem-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: siem-engine
+  template:
+    metadata:
+      labels:
+        app: siem-engine
+    spec:
+      containers:
+      - name: siem-engine
+        image: siem_engine:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8002
+          name: webhook
+        - containerPort: 8003
+          name: metrics
+        env:
+        - name: SIEM_SOURCE_TYPE
+          value: "webhook"
+        - name: SIEM_METRICS_PORT
+          value: "8003"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: siem-generator
+  labels:
+    app: siem-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: siem-generator
+  template:
+    metadata:
+      labels:
+        app: siem-generator
+    spec:
+      containers:
+      - name: siem-generator
+        image: siem_generator:latest
+        imagePullPolicy: Never
+        env:
+        - name: WEBHOOK_URL
+          value: "http://siem-engine:8002"
+        ports:
+        - containerPort: 8001
+          name: metrics

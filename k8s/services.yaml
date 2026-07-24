@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: siem-engine
+spec:
+  selector:
+    app: siem-engine
+  ports:
+    - name: webhook
+      protocol: TCP
+      port: 8002
+      targetPort: 8002
+    - name: metrics
+      protocol: TCP
+      port: 8003
+      targetPort: 8003
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: siem-generator
+spec:
+  selector:
+    app: siem-generator
+  ports:
+    - name: metrics
+      protocol: TCP
+      port: 8001
+      targetPort: 8001

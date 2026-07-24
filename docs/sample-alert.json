@@ -1,0 +1,31 @@
+{
+  "alert_id": "ALERT-R002-39f28a7e-1234-5678-abcd-ef0123456789",
+  "rule_id": "R002",
+  "severity": "CRITICAL",
+  "risk_score": 90,
+  "mitre_attack": "T1078",
+  "title": "Successful Compromise Following Brute Force",
+  "source_ip": "100.20.30.40",
+  "targeted_users": [
+    "root"
+  ],
+  "enrichment": {
+    "geoip": {
+      "ip": "100.20.30.40",
+      "country": "RU"
+    },
+    "asset_context": {
+      "critical_targets_hit": 1,
+      "critical_users": [
+        "root"
+      ]
+    }
+  },
+  "timestamp": "2026-07-24T18:11:58.204Z",
+  "evidence": [
+    "{\"event_id\": \"uuid1\", \"event_type\": \"authentication\", \"status\": \"failed\", \"source_ip\": \"100.20.30.40\", \"user\": \"root\", \"timestamp\": \"2026-07-24T18:11:58Z\"}",
+    "{\"event_id\": \"uuid2\", \"event_type\": \"authentication\", \"status\": \"failed\", \"source_ip\": \"100.20.30.40\", \"user\": \"root\", \"timestamp\": \"2026-07-24T18:11:58Z\"}",
+    "{\"event_id\": \"uuid3\", \"event_type\": \"authentication\", \"status\": \"failed\", \"source_ip\": \"100.20.30.40\", \"user\": \"root\", \"timestamp\": \"2026-07-24T18:11:58Z\"}",
+    "{\"event_id\": \"uuid4\", \"event_type\": \"authentication\", \"status\": \"success\", \"source_ip\": \"100.20.30.40\", \"user\": \"root\", \"timestamp\": \"2026-07-24T18:11:58Z\"}"
+  ]
+}
