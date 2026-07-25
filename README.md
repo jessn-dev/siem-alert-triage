@@ -4,6 +4,13 @@
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
   [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/release/python-3130/)
   [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
+
+  ![Python](https://img.shields.io/badge/python-3670A0?style=flat&logo=python&logoColor=ffdd54)
+  ![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=flat&logo=docker&logoColor=white)
+  ![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=flat&logo=kubernetes&logoColor=white)
+  ![Redis](https://img.shields.io/badge/redis-%23DD0031.svg?style=flat&logo=redis&logoColor=white)
+  ![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=flat&logo=Prometheus&logoColor=white)
+  ![Grafana](https://img.shields.io/badge/grafana-%23F46800.svg?style=flat&logo=grafana&logoColor=white)
 </div>
 
 # Cloud-agnostic SIEM detection and alerting pipeline
@@ -18,7 +25,60 @@ behind interfaces you pick with environment variables.
 
 ![Detections firing in the containerized stack](docs/media/pipeline.gif)
 
-## Quick start
+## Highlights
+
+- 🔍 Three correlation rules mapped to MITRE ATT&CK, written in YAML rather than Python
+- ⏱️ Event-time sliding windows that survive cloud ingestion lag, clock skew, and replay
+- 🧭 Severity derived at runtime from GeoIP and asset criticality, so the same rule pages differently depending on context
+- 🔌 Sources, sinks, state, and parsers behind interfaces, swapped with one environment variable
+- 🧾 Alerts carry the raw events that triggered them, so triage does not start with a grep
+- 📡 Deadman switch plus rules for the harder case where the pipeline is alive and no longer receiving
+- 🔐 Authenticated ingest with constant-time token comparison, no credential in version control
+- ✅ 78 tests, plus CI checks on PromQL, Alertmanager config, and rendered Kubernetes manifests
+
+## Contents
+
+- [Running it locally](#running-it-locally)
+- [How it works](#how-it-works)
+- [Repository layout](#repository-layout)
+- [Configuration](#configuration)
+- [Adding a cloud](#adding-a-cloud)
+- [Deploying to Kubernetes](#deploying-to-kubernetes)
+- [Tests](#tests)
+- [Architectural pitfalls and lessons learned](#architectural-pitfalls-and-lessons-learned)
+- [Known limitations](#known-limitations)
+
+## The problem it addresses
+
+A SOC rarely fails for lack of detections. It fails because alerts are noisy,
+because they arrive with no evidence to triage, or because the pipeline dies
+quietly and nobody notices the silence.
+
+The design targets those three failures. Noise is handled with suppression
+windows, allowlists, context-derived severity, and Alertmanager inhibition.
+Triage is handled by shipping the matching raw events inside the alert. Silence
+is handled with a deadman switch on scrape health, plus rules for the nastier
+cases where the process is alive and scrapeable but has stopped receiving
+anything.
+
+## What it detects
+
+| ID | Rule | Type | ATT&CK | Base risk |
+|----|------|------|--------|-----------|
+| R001 | Brute force, failure volume from one IP | `threshold` | [T1110.001](https://attack.mitre.org/techniques/T1110/001/) | 40 |
+| R002 | Compromise, success after a failure burst on the same account | `sequence` | [T1078](https://attack.mitre.org/techniques/T1078/) | 80 |
+| R003 | Password spray, one IP across many accounts | `spray` | [T1110.003](https://attack.mitre.org/techniques/T1110/003/) | 60 |
+
+Base risk is a starting point, not the answer. Final severity comes from runtime
+enrichment, so the same rule against the same account can page or not depending
+on where the traffic came from.
+
+Every alert carries the raw events that triggered it, the enrichment behind its
+score, and its ATT&CK mapping:
+
+![An alert payload with evidence, enrichment, and ATT&CK mapping](docs/media/alert.png)
+
+## Running it locally
 
 ```bash
 git clone https://github.com/jessn-dev/siem-alert-triage.git
@@ -30,6 +90,13 @@ docker logs -f siem_webhook_receiver
 That brings up the engine, a log generator, Redis, Prometheus, Alertmanager,
 Grafana, and a webhook receiver. Grafana is at `localhost:3000` (`admin`/`admin`,
 local only), Prometheus at `:9090`, Alertmanager at `:9093`.
+
+The dashboard provisions itself, so it has data as soon as the stack is warm:
+
+![SIEM Observability Overview dashboard](docs/media/dashboard.png)
+
+Detections broken down by rule and severity, MTTD percentiles, ingestion
+throughput, and every path an event can be discarded on.
 
 ### Run the scripted attack
 
@@ -67,33 +134,7 @@ immediately instead of quietly starving the pipeline.
 docker stop siem_engine   # SIEMComponentDown fires within about 15s
 ```
 
-## Detections
-
-| ID | Rule | Type | ATT&CK | Base risk |
-|----|------|------|--------|-----------|
-| R001 | Brute force, failure volume from one IP | `threshold` | [T1110.001](https://attack.mitre.org/techniques/T1110/001/) | 40 |
-| R002 | Compromise, success after a failure burst on the same account | `sequence` | [T1078](https://attack.mitre.org/techniques/T1078/) | 80 |
-| R003 | Password spray, one IP across many accounts | `spray` | [T1110.003](https://attack.mitre.org/techniques/T1110/003/) | 60 |
-
-Every alert carries the raw events that triggered it, the enrichment behind its
-score, and its ATT&CK mapping. Here is real output from the run above:
-
-![An alert payload with evidence, enrichment, and ATT&CK mapping](docs/media/alert.png)
-
-## Why alert monitoring
-
-A SOC rarely fails for lack of detections. It fails because alerts are noisy,
-because they arrive with no evidence to triage, or because the pipeline dies
-quietly and nobody notices the silence.
-
-The design targets those three failures. Noise is handled with suppression
-windows, allowlists, context-derived severity, and Alertmanager inhibition.
-Triage is handled by shipping the matching raw events inside the alert. Silence
-is handled with a deadman switch on scrape health, plus rules for the nastier
-cases where the process is alive and scrapeable but has stopped receiving
-anything.
-
-## Architecture
+## How it works
 
 ```mermaid
 flowchart LR
@@ -124,7 +165,31 @@ Severity routing runs the whole way through to delivery:
 
 ![Metrics, Alertmanager state, and webhook delivery by route](docs/media/routing.png)
 
-### Configuration
+## Repository layout
+
+```
+siem_engine.py              detection loop, rule dispatch, alert assembly
+log_generator.py            synthetic auth traffic with attacks mixed in
+simulate_attack.py          deterministic run across every rule and both negatives
+rules.yml                   detections-as-code with tuning allowlists
+src/
+  config.py                 12-factor configuration
+  factory.py                backend selection
+  enrichment.py             GeoIP, asset criticality, risk scoring
+  emit.py                   shared transport for generator and simulator
+  sources/  sinks/  state/  parsers/
+prometheus/                 scrape config and alerting rules
+alertmanager/               routing tree and inhibition
+grafana/                    provisioned datasource and dashboard
+k8s/                        deployments, services, monitoring stack
+kustomization.yaml          generates ConfigMaps and Secrets from the real files
+scripts/                    manifest validator, media rendering
+.env.secrets.example        template for the gitignored ingest token
+docs/sample-alert.json      real engine output
+tests/                      78 tests
+```
+
+## Configuration
 
 Everything is environment-driven, in `src/config.py`.
 
@@ -150,7 +215,7 @@ Everything is environment-driven, in `src/config.py`.
 The engine and the producer read the same `SIEM_INGEST_TOKEN`. If they disagree,
 the engine returns 401 and the producer logs a delivery failure for every event.
 
-### Adding a cloud
+## Adding a cloud
 
 Each provider is a new class, not an engine change.
 
@@ -162,7 +227,7 @@ key set and that CloudTrail events fire `rules.yml` with no rule changes. For
 shared state, `RedisState` already exists and parity tests run the same scenarios
 against both backends.
 
-### Kubernetes
+## Deploying to Kubernetes
 
 ```bash
 docker build -f Dockerfile.engine -t siem-engine:0.1.0 .
@@ -201,19 +266,20 @@ and builds both images. A typo in PromQL is a silent alerting outage, and a
 Deployment pointing at a Secret that was never generated is a silent deployment
 outage. No unit test catches either.
 
-## Tech stack
-
-![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
-![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
-![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=for-the-badge&logo=kubernetes&logoColor=white)
-![Redis](https://img.shields.io/badge/redis-%23DD0031.svg?style=for-the-badge&logo=redis&logoColor=white)
-![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=Prometheus&logoColor=white)
-![Grafana](https://img.shields.io/badge/grafana-%23F46800.svg?style=for-the-badge&logo=grafana&logoColor=white)
-
 ## Architectural pitfalls and lessons learned
 
 Every item below is a bug this project actually had. Where a regression test
 pins the fix, it is named.
+
+Grouped by where the bug lived:
+
+| | |
+|---|---|
+| **Time and state** | [1](#1-event-time-and-wall-clock-time-are-different-clocks) event vs wall clock · [2](#2-one-global-watermark-lets-any-broken-clock-blind-the-engine) watermark poisoning · [3](#3-garbage-collection-needs-the-other-clock) the GC clock · [4](#4-at-least-once-delivery-manufactures-attacks) duplicate delivery · [5](#5-housekeeping-after-a-continue-will-starve) housekeeping starvation |
+| **Detection logic** | [6](#6-detections-as-code-that-still-hardcodes-rule-ids) fake detections-as-code · [7](#7-password-spray-is-not-brute-force-with-a-smaller-number) spray vs brute force · [8](#8-sequence-rules-and-the-nat-gateway) NAT gateways · [9](#9-static-severity-is-alert-fatigue-by-design) static severity · [10](#10-ipaddressis_private-does-not-mean-internal) `is_private` |
+| **Alerting** | [11](#11-adding-a-metric-label-can-break-your-alert-rules-silently) label breaks PromQL · [12](#12-rate-on-sparse-counters-invents-spikes) sparse `rate()` · [13](#13-up--0-misses-a-pipeline-that-has-gone-deaf) deaf pipelines · [14](#14-inhibition-should-not-be-total) total inhibition |
+| **Portability** | [15](#15-shared-volumes-are-a-scheduling-constraint) shared volumes · [16](#16-half-ocsf-is-worse-than-an-honest-custom-schema) half-OCSF · [17](#17-a-pluggable-backend-nobody-installs-is-not-pluggable) undeclared deps · [18](#18-a-stub-behind-a-load-bearing-claim) the stub |
+| **Deployment** | [19](#19-the-latest-tag) `latest` · [20](#20-container-hygiene-and-what-hardening-breaks) hardening fallout · [21](#21-an-unauthenticated-ingest-endpoint-is-a-detection-evasion-surface) open ingest · [22](#22-the-200-shaped-failure) 200-shaped failures · [23](#23-secrets-do-not-belong-in-manifests) secrets in git · [24](#24-a-manifest-on-disk-is-not-a-manifest-in-the-build) unrendered manifests |
 
 ### 1. Event time and wall-clock time are different clocks
 
@@ -535,30 +601,6 @@ not survive a restart. MTTD is computed as `wall_clock - event_time`, which unde
 real cloud ingestion lag mixes upstream delay into what reads as processing
 speed. GeoIP is a static prefix table rather than a real provider; swapping in
 MaxMind means replacing `lookup_country` and nothing else.
-
-## Repository layout
-
-```
-siem_engine.py              detection loop, rule dispatch, alert assembly
-log_generator.py            synthetic auth traffic with attacks mixed in
-simulate_attack.py          deterministic run across every rule and both negatives
-rules.yml                   detections-as-code with tuning allowlists
-src/
-  config.py                 12-factor configuration
-  factory.py                backend selection
-  enrichment.py             GeoIP, asset criticality, risk scoring
-  emit.py                   shared transport for generator and simulator
-  sources/  sinks/  state/  parsers/
-prometheus/                 scrape config and alerting rules
-alertmanager/               routing tree and inhibition
-grafana/                    provisioned datasource and dashboard
-k8s/                        deployments, services, monitoring stack
-kustomization.yaml          generates ConfigMaps and Secrets from the real files
-scripts/                    manifest validator, media rendering
-.env.secrets.example        template for the gitignored ingest token
-docs/sample-alert.json      real engine output
-tests/                      78 tests
-```
 
 ## License and usage
 
