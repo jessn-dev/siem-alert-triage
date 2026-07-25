@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - k8s/deployments.yaml
+  - k8s/services.yaml
+  - k8s/monitoring.yaml
+
+# ConfigMaps are generated from the same files docker-compose mounts, so the
+# alerting rules can never drift between the local stack and the cluster.
+configMapGenerator:
+  - name: prometheus-config
+    files:
+      - prometheus.yml=k8s/prometheus-k8s.yml
+  - name: prometheus-rules
+    files:
+      - alert.rules.yml=prometheus/alert.rules.yml
+  - name: alertmanager-config
+    files:
+      - alertmanager.yml=alertmanager/alertmanager.yml
+  - name: siem-rules
+    files:
+      - rules.yml=rules.yml
+
+# Generated from a gitignored file rather than a committed Secret manifest, so
+# the ingest token never enters version control. Copy .env.secrets.example to
+# .env.secrets and set a real value before deploying.
+secretGenerator:
+  - name: siem-secrets
+    envs:
+      - .env.secrets
+
+generatorOptions:
+  disableNameSuffixHash: true

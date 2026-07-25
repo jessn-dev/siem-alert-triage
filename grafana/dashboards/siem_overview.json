@@ -1,109 +1,122 @@
 {
   "title": "SIEM Observability Overview",
-  "tags": [
-    "siem",
-    "security"
-  ],
+  "tags": ["siem", "security"],
   "timezone": "browser",
+  "refresh": "10s",
+  "time": { "from": "now-15m", "to": "now" },
   "panels": [
     {
-      "type": "timeseries",
-      "title": "Authentication Logs Generated (Rate)",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
+      "type": "stat",
+      "title": "Detections (last 15m)",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum(increase(siem_alerts_generated_total[15m]))", "legendFormat": "alerts" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Critical detections (last 15m)",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
       "targets": [
         {
-          "expr": "rate(mock_logs_generated_total[1m])",
-          "legendFormat": "{{status}}"
+          "expr": "sum(increase(siem_alerts_generated_total{severity=\"CRITICAL\"}[15m]))",
+          "legendFormat": "critical"
         }
       ]
     },
     {
       "type": "stat",
-      "title": "Active Tracked IPs",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
+      "title": "Active tracked IPs",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "siem_active_tracked_ips", "legendFormat": "IPs" }]
+    },
+    {
+      "type": "stat",
+      "title": "p95 detection latency (MTTD)",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
       "targets": [
         {
-          "expr": "siem_active_tracked_ips",
-          "legendFormat": "IPs Tracking"
+          "expr": "histogram_quantile(0.95, sum(rate(siem_mttd_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
         }
       ]
     },
     {
       "type": "timeseries",
-      "title": "SIEM Alerts Generated",
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 8
-      },
+      "title": "Detections by rule",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
       "targets": [
         {
-          "expr": "siem_alerts_generated_total",
-          "legendFormat": "Alerts Fired"
-        }
-      ]
-    },
-    {
-      "type": "heatmap",
-      "title": "Mean Time To Detect (MTTD)",
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 16
-      },
-      "targets": [
-        {
-          "expr": "sum(rate(siem_mttd_seconds_bucket[1m])) by (le)",
-          "format": "heatmap",
-          "legendFormat": "{{le}}"
+          "expr": "sum(increase(siem_alerts_generated_total[5m])) by (rule_id, severity)",
+          "legendFormat": "{{rule_id}} ({{severity}})"
         }
       ]
     },
     {
       "type": "timeseries",
-      "title": "Malformed Logs (Rate)",
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 16
-      },
+      "title": "Detection latency distribution",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
       "targets": [
         {
-          "expr": "rate(siem_logs_malformed_total[1m])",
-          "legendFormat": "Malformed Rate"
+          "expr": "histogram_quantile(0.50, sum(rate(siem_mttd_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(siem_mttd_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(siem_mttd_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99"
         }
       ]
     },
     {
-      "type": "barchart",
-      "title": "Alerts by Rule ID",
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 16
-      },
+      "type": "timeseries",
+      "title": "Ingestion throughput",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "targets": [
+        { "expr": "sum(rate(siem_logs_processed_total[1m]))", "legendFormat": "processed" },
+        { "expr": "sum(rate(mock_logs_generated_total[1m]))", "legendFormat": "generated" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Pipeline health: malformed, rejected, degraded",
+      "description": "Silent drops are the failure mode that makes a SIEM lie. Every discard path is counted here.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "targets": [
+        { "expr": "sum(rate(siem_logs_malformed_total[1m]))", "legendFormat": "malformed" },
+        {
+          "expr": "sum(rate(siem_events_rejected_total[1m])) by (reason)",
+          "legendFormat": "rejected: {{reason}}"
+        },
+        {
+          "expr": "sum(rate(siem_events_dropped_total[1m])) by (reason)",
+          "legendFormat": "degraded: {{reason}}"
+        },
+        {
+          "expr": "sum(rate(mock_logs_send_failed_total[1m])) by (reason)",
+          "legendFormat": "undelivered: {{reason}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Simulated attack activity",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 21 },
       "targets": [
         {
-          "expr": "sum(siem_alerts_generated_total) by (rule_id)",
-          "legendFormat": "{{rule_id}}"
+          "expr": "sum(rate(mock_bruteforce_simulations_total[1m]))",
+          "legendFormat": "brute force events"
+        },
+        {
+          "expr": "sum(rate(mock_compromise_simulations_total[1m]))",
+          "legendFormat": "compromise events"
         }
       ]
     }
-  ],
-  "schemaVersion": 38,
-  "refresh": "5s"
+  ]
 }

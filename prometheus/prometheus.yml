@@ -1,5 +1,6 @@
 global:
   scrape_interval: 5s
+  evaluation_interval: 5s
 
 rule_files:
   - "alert.rules.yml"
@@ -12,4 +13,6 @@ alerting:
 scrape_configs:
   - job_name: 'siem_mock_environment'
     static_configs:
-      - targets: ['siem_generator:8001', 'siem_engine:8002']
+      - targets:
+          - 'siem_generator:8001'   # log generator
+          - 'siem_engine:8003'      # detection engine

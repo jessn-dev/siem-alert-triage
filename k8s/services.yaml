@@ -1,12 +1,15 @@
+---
 apiVersion: v1
 kind: Service
 metadata:
   name: siem-engine
+  labels:
+    app: siem-engine
 spec:
   selector:
     app: siem-engine
   ports:
-    - name: webhook
+    - name: ingest
       protocol: TCP
       port: 8002
       targetPort: 8002
@@ -19,6 +22,8 @@ apiVersion: v1
 kind: Service
 metadata:
   name: siem-generator
+  labels:
+    app: siem-generator
 spec:
   selector:
     app: siem-generator
@@ -27,3 +32,18 @@ spec:
       protocol: TCP
       port: 8001
       targetPort: 8001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels:
+    app: redis
+spec:
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      protocol: TCP
+      port: 6379
+      targetPort: 6379

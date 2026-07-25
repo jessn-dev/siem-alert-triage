@@ -1,3 +1,6 @@
+---
+# Detection engine. Ingests over HTTP and keeps window state in Redis, so
+# replicas can be scaled without splitting an attacker's activity across pods.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -5,7 +8,7 @@ metadata:
   labels:
     app: siem-engine
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: siem-engine
@@ -14,20 +17,76 @@ spec:
       labels:
         app: siem-engine
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-      - name: siem-engine
-        image: siem_engine:latest
-        imagePullPolicy: Never
-        ports:
-        - containerPort: 8002
-          name: webhook
-        - containerPort: 8003
-          name: metrics
-        env:
-        - name: SIEM_SOURCE_TYPE
-          value: "webhook"
-        - name: SIEM_METRICS_PORT
-          value: "8003"
+        - name: siem-engine
+          image: siem-engine:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8002
+              name: ingest
+            - containerPort: 8003
+              name: metrics
+          env:
+            - name: SIEM_SOURCE_TYPE
+              value: "webhook"
+            - name: SIEM_WEBHOOK_LISTEN_PORT
+              value: "8002"
+            - name: SIEM_METRICS_PORT
+              value: "8003"
+            - name: SIEM_SINK_TYPE
+              value: "webhook"
+            - name: SIEM_SINK_WEBHOOK_URL
+              value: "http://webhook-receiver:8080/alerts"
+            - name: SIEM_STATE_BACKEND
+              value: "redis"
+            - name: REDIS_HOST
+              value: "redis"
+            - name: SIEM_RULES_FILE
+              value: "/etc/siem/rules.yml"
+            - name: SIEM_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: siem-secrets
+                  key: SIEM_INGEST_TOKEN
+          volumeMounts:
+            # Detections are config, not image content: tuning a threshold is a
+            # ConfigMap change, not a rebuild and redeploy.
+            - name: rules
+              mountPath: /etc/siem
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 8003
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: 8003
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: rules
+          configMap:
+            name: siem-rules
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -45,13 +104,79 @@ spec:
       labels:
         app: siem-generator
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-      - name: siem-generator
-        image: siem_generator:latest
-        imagePullPolicy: Never
-        env:
-        - name: WEBHOOK_URL
-          value: "http://siem-engine:8002"
-        ports:
-        - containerPort: 8001
-          name: metrics
+        - name: siem-generator
+          image: siem-generator:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8001
+              name: metrics
+          env:
+            - name: WEBHOOK_URL
+              value: "http://siem-engine:8002"
+            - name: SIEM_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: siem-secrets
+                  key: SIEM_INGEST_TOKEN
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+# Shared detection state. In a real cluster this is a managed cache
+# (ElastiCache / MemoryStore / Azure Cache) reached by connection string only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.2-alpine
+          args: ["redis-server", "--save", "", "--appendonly", "no"]
+          ports:
+            - containerPort: 6379
+              name: redis
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi

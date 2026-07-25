@@ -1,39 +1,84 @@
 groups:
-  - name: siem_alerts
+  - name: siem_detections
     rules:
+      # siem_alerts_generated_total is labelled by severity AND rule_id, so it
+      # is a family of series. Any bare increase() here would evaluate per
+      # series and miss aggregate volume entirely - hence sum().
       - alert: HighAlertVolume
-        # Fix 1: Require at least 3 alerts over 5 minutes to prevent stuck alerts
-        expr: increase(siem_alerts_generated_total[5m]) > 3
+        expr: sum(increase(siem_alerts_generated_total[5m])) > 3
         for: 10s
         labels:
           severity: warning
+          job: siem_mock_environment
         annotations:
-          summary: "High volume of SIEM alerts generated"
-          description: "The SIEM engine is generating alerts rapidly, indicating an ongoing attack or noisy rule."
-          
+          summary: "High volume of SIEM detections"
+          description: "{{ $value | printf \"%.0f\" }} detections in 5m. Ongoing attack, or a rule needs tuning."
+
       - alert: CriticalSIEMDetection
-        expr: increase(siem_alerts_generated_total{severity="CRITICAL"}[1m]) > 0
+        expr: sum(increase(siem_alerts_generated_total{severity="CRITICAL"}[1m])) by (rule_id) > 0
         labels:
           severity: critical
+          job: siem_mock_environment
         annotations:
-          summary: "Critical SIEM Detection Triggered"
-          description: "A CRITICAL severity detection rule was triggered."
+          summary: "CRITICAL detection: {{ $labels.rule_id }}"
+          description: "A CRITICAL severity rule fired. Triage the alert payload immediately."
 
-      - alert: MalformedLogsSpike
-        # Fix 2: Alert on parsing failures
-        expr: increase(siem_logs_malformed_total[5m]) > 10
-        for: 15s
-        labels:
-          severity: warning
-        annotations:
-          summary: "Spike in Malformed Logs"
-          description: "The SIEM engine is failing to parse incoming logs. Check log format."
-
+  - name: siem_pipeline_health
+    rules:
       - alert: SIEMComponentDown
         expr: up{job="siem_mock_environment"} == 0
         for: 15s
         labels:
           severity: critical
         annotations:
-          summary: "SIEM Mock Component Down (Blind SOC)"
-          description: "A core SIEM component is not responding to Prometheus scrapes. SOC visibility is impaired."
+          summary: "SIEM component down (blind SOC)"
+          description: "{{ $labels.instance }} is not responding to scrapes. Detection coverage is impaired."
+
+      - alert: MalformedLogsSpike
+        # increase(), not rate(): rate() extrapolates over sparse counters and
+        # turns a single malformed line into a false spike.
+        expr: sum(increase(siem_logs_malformed_total[5m])) > 10
+        for: 15s
+        labels:
+          severity: warning
+          job: siem_mock_environment
+        annotations:
+          summary: "Spike in malformed logs"
+          description: "Parsing is failing. A log source changed format, or the wrong parser is configured."
+
+      - alert: IngestionStalled
+        # A live engine that has stopped receiving events looks identical to a
+        # healthy quiet one from `up` alone. This catches the silent failure.
+        expr: sum(rate(siem_logs_processed_total[5m])) == 0 and on() up{job="siem_mock_environment"} == 1
+        for: 2m
+        labels:
+          severity: critical
+          job: siem_mock_environment
+        annotations:
+          summary: "Ingestion stalled while engine is up"
+          description: "The engine is scrapeable but has processed no events for 2 minutes. Upstream delivery is broken."
+
+      - alert: LogDeliveryFailing
+        # The producer-side twin of MalformedLogsSpike. A token mismatch or an
+        # unreachable engine means events never arrive at all, which `up` on the
+        # engine cannot see - the engine is perfectly healthy, just deaf.
+        expr: sum(increase(mock_logs_send_failed_total[5m])) by (reason) > 5
+        for: 1m
+        labels:
+          severity: critical
+          job: siem_mock_environment
+        annotations:
+          summary: "Log delivery failing: {{ $labels.reason }}"
+          description: >-
+            The generator cannot deliver events (reason={{ $labels.reason }}).
+            reason=auth means SIEM_INGEST_TOKEN disagrees between producer and engine.
+
+      - alert: EventsRejectedSpike
+        expr: sum(increase(siem_events_rejected_total{reason!="allowlisted"}[10m])) by (reason) > 20
+        for: 1m
+        labels:
+          severity: warning
+          job: siem_mock_environment
+        annotations:
+          summary: "Events being rejected: {{ $labels.reason }}"
+          description: "Sustained rejections for reason={{ $labels.reason }}. Check clock sync or duplicate delivery upstream."

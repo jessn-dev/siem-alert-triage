@@ -2,28 +2,75 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   test:
+    name: Lint and test
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python 3.13
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.13"
-        cache: "pip"
-        
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest
-        
-    - name: Run Tests
-      run: |
-        python -m pytest tests/
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+  validate-config:
+    name: Validate monitoring config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Detection rules are code. A typo in PromQL is a silent alerting outage,
+      # so rule files get checked in CI like any other source file.
+      - name: Check Prometheus rules
+        run: |
+          docker run --rm -v "$PWD/prometheus:/p" --entrypoint promtool \
+            prom/prometheus:v2.45.0 check rules /p/alert.rules.yml
+
+      - name: Check Alertmanager config
+        run: |
+          docker run --rm -v "$PWD/alertmanager:/a" --entrypoint amtool \
+            prom/alertmanager:v0.25.0 check-config /a/alertmanager.yml
+
+      - name: Validate compose file
+        run: docker compose config --quiet
+
+      # Checks the rendered output, not the source files. A Deployment can
+      # reference a ConfigMap or Secret that exists on disk but was never added
+      # to kustomization.yaml - every file valid, every pod stuck in
+      # CreateContainerConfigError.
+      # Pinned rather than relying on whatever kubectl the runner image ships.
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.30.0'
+
+      - name: Validate rendered Kubernetes manifests
+        run: |
+          cp .env.secrets.example .env.secrets
+          pip install pyyaml
+          kubectl kustomize . | python scripts/validate_manifests.py
+
+  build:
+    name: Build images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build engine image
+        run: docker build -f Dockerfile.engine -t siem-engine:ci .
+      - name: Build generator image
+        run: docker build -f Dockerfile.generator -t siem-generator:ci .

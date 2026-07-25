@@ -1,31 +1,43 @@
 {
-  "alert_id": "ALERT-R002-39f28a7e-1234-5678-abcd-ef0123456789",
-  "rule_id": "R002",
-  "severity": "CRITICAL",
-  "risk_score": 90,
-  "mitre_attack": "T1078",
-  "title": "Successful Compromise Following Brute Force",
-  "source_ip": "100.20.30.40",
-  "targeted_users": [
-    "root"
-  ],
-  "enrichment": {
-    "geoip": {
-      "ip": "100.20.30.40",
-      "country": "RU"
+    "alert_id": "ALERT-R002-46bccabd-fdce-4324-832c-6340dfb862e7",
+    "rule_id": "R002",
+    "severity": "CRITICAL",
+    "risk_score": 100,
+    "mitre_attack": "T1078",
+    "title": "Successful Compromise Following Brute Force",
+    "source_ip": "198.51.100.22",
+    "targeted_users": [
+        "admin",
+        "alice",
+        "bob",
+        "service_account",
+        "testuser"
+    ],
+    "enrichment": {
+        "geoip": {
+            "ip": "198.51.100.22",
+            "country": "CN",
+            "is_internal": false
+        },
+        "asset_context": {
+            "critical_targets_hit": 1,
+            "critical_users": [
+                "admin"
+            ]
+        }
     },
-    "asset_context": {
-      "critical_targets_hit": 1,
-      "critical_users": [
-        "root"
-      ]
-    }
-  },
-  "timestamp": "2026-07-24T18:11:58.204Z",
-  "evidence": [
-    "{\"event_id\": \"uuid1\", \"event_type\": \"authentication\", \"status\": \"failed\", \"source_ip\": \"100.20.30.40\", \"user\": \"root\", \"timestamp\": \"2026-07-24T18:11:58Z\"}",
-    "{\"event_id\": \"uuid2\", \"event_type\": \"authentication\", \"status\": \"failed\", \"source_ip\": \"100.20.30.40\", \"user\": \"root\", \"timestamp\": \"2026-07-24T18:11:58Z\"}",
-    "{\"event_id\": \"uuid3\", \"event_type\": \"authentication\", \"status\": \"failed\", \"source_ip\": \"100.20.30.40\", \"user\": \"root\", \"timestamp\": \"2026-07-24T18:11:58Z\"}",
-    "{\"event_id\": \"uuid4\", \"event_type\": \"authentication\", \"status\": \"success\", \"source_ip\": \"100.20.30.40\", \"user\": \"root\", \"timestamp\": \"2026-07-24T18:11:58Z\"}"
-  ]
+    "timestamp": "2026-07-25T13:10:00.645831Z",
+    "detected_event_time": "2026-07-25T13:10:00.642000Z",
+    "evidence": [
+        "{\"event_id\": \"0e7a38ca-5066-4f9c-9dc9-a5416528ab1a\", \"timestamp\": \"2026-07-25T13:09:06.847972Z\", \"event_type\": \"authentication\", \"user\": \"testuser\", \"source_ip\": \"198.51.100.22\", \"status\": \"failed\", \"message\": \"User testuser authentication failed from 198.51.100.22\"}",
+        "{\"event_id\": \"3a28e47a-bb81-42f3-b4b3-b4a6855ab6ed\", \"timestamp\": \"2026-07-25T13:09:16.153641Z\", \"event_type\": \"authentication\", \"user\": \"alice\", \"source_ip\": \"198.51.100.22\", \"status\": \"failed\", \"message\": \"User alice authentication failed from 198.51.100.22\"}",
+        "{\"event_id\": \"2f3e701d-4287-430a-aca5-8c4aa4417bc3\", \"timestamp\": \"2026-07-25T13:09:17.813586Z\", \"event_type\": \"authentication\", \"user\": \"testuser\", \"source_ip\": \"198.51.100.22\", \"status\": \"failed\", \"message\": \"User testuser authentication failed from 198.51.100.22\"}",
+        "{\"event_id\": \"224cd759-9c0c-433d-aa78-a0d642fe4c08\", \"timestamp\": \"2026-07-25T13:09:25.524319Z\", \"event_type\": \"authentication\", \"user\": \"service_account\", \"source_ip\": \"198.51.100.22\", \"status\": \"failed\", \"message\": \"User service_account authentication failed from 198.51.100.22\"}",
+        "{\"event_id\": \"0f31a8b3-9c87-493b-93f2-7bfbb5b9ce9f\", \"timestamp\": \"2026-07-25T13:09:37.337128Z\", \"event_type\": \"authentication\", \"user\": \"alice\", \"source_ip\": \"198.51.100.22\", \"status\": \"failed\", \"message\": \"User alice authentication failed from 198.51.100.22\"}",
+        "{\"event_id\": \"f7e317d9-eb95-4c4d-b5b7-c968c7f8b928\", \"timestamp\": \"2026-07-25T13:09:42.680615Z\", \"event_type\": \"authentication\", \"user\": \"admin\", \"source_ip\": \"198.51.100.22\", \"status\": \"failed\", \"message\": \"User admin authentication failed from 198.51.100.22\"}",
+        "{\"event_id\": \"48949b81-4488-4241-a9e6-0ed42a51c19b\", \"timestamp\": \"2026-07-25T13:09:42.890659Z\", \"event_type\": \"authentication\", \"user\": \"bob\", \"source_ip\": \"198.51.100.22\", \"status\": \"failed\", \"message\": \"User bob authentication failed from 198.51.100.22\"}",
+        "{\"event_id\": \"5e546a6b-d2f9-4726-b370-636609e323f5\", \"timestamp\": \"2026-07-25T13:09:57.744372Z\", \"event_type\": \"authentication\", \"user\": \"admin\", \"source_ip\": \"198.51.100.22\", \"status\": \"failed\", \"message\": \"User admin authentication failed from 198.51.100.22\"}",
+        "{\"event_id\": \"13d09b6b-fe98-44b3-b048-6e1233d9b965\", \"timestamp\": \"2026-07-25T13:09:57.361513Z\", \"event_type\": \"authentication\", \"user\": \"alice\", \"source_ip\": \"198.51.100.22\", \"status\": \"success\", \"message\": \"User alice authentication success from 198.51.100.22\"}",
+        "{\"event_id\": \"7ddc200c-532c-4e92-b1a2-2ac7b54ca232\", \"timestamp\": \"2026-07-25T13:10:00.642755Z\", \"event_type\": \"authentication\", \"user\": \"alice\", \"source_ip\": \"198.51.100.22\", \"status\": \"success\", \"message\": \"User alice authentication success from 198.51.100.22\"}"
+    ]
 }

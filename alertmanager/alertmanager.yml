@@ -1,25 +1,32 @@
+global:
+  resolve_timeout: 5m
+
 route:
-  group_by: ['alertname', 'severity']
+  group_by: ['alertname', 'rule_id']
   group_wait: 5s
-  group_interval: 10s
-  # Fix 1: Production-ready repeat interval
+  group_interval: 30s
+  # Hours, not minutes. A re-notify loop is how on-call learns to ignore the pager.
   repeat_interval: 4h
-  # Fix 2: Actual routing tree
   receiver: 'ticket_webhook'
   routes:
-    - match:
-        severity: critical
+    - matchers:
+        - severity = "critical"
       receiver: 'pager_webhook'
-    - match:
-        severity: warning
+      # Critical detections re-notify faster than the default.
+      repeat_interval: 1h
+    - matchers:
+        - severity = "warning"
       receiver: 'ticket_webhook'
 
 inhibit_rules:
-  # Fix 3: Suppress HighAlertVolume noise when the entire SIEM is down
-  - source_match:
-      alertname: 'SIEMComponentDown'
-    target_match_re:
-      alertname: 'HighAlertVolume|MalformedLogsSpike'
+  # When the pipeline itself is down, its metrics go stale. Every metric-derived
+  # alert then becomes noise about a cause we have already paged for.
+  # CriticalSIEMDetection is deliberately NOT inhibited: a real detection that
+  # fired just before the outage must still reach a human.
+  - source_matchers:
+      - alertname = "SIEMComponentDown"
+    target_matchers:
+      - alertname =~ "HighAlertVolume|MalformedLogsSpike|IngestionStalled|EventsRejectedSpike"
     equal: ['job']
 
 receivers:

@@ -27,6 +27,10 @@ venv/
 env/
 .env
 
+# Secrets. .env.secrets feeds the kustomize secretGenerator; only the
+# .example template is tracked.
+.env.secrets
+
 # Project specific
 logs/
 alerts/

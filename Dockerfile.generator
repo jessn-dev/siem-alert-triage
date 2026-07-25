@@ -1,15 +1,18 @@
 FROM python:3.13-slim
 
-RUN useradd --create-home appuser
+RUN useradd --create-home --uid 10001 appuser
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY log_generator.py .
-RUN chown -R appuser:appuser /app
+COPY --chown=appuser:appuser src/ ./src/
+COPY --chown=appuser:appuser log_generator.py simulate_attack.py ./
 
 USER appuser
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+EXPOSE 8001
 
 CMD ["python", "log_generator.py"]

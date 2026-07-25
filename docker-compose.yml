@@ -5,7 +5,10 @@ services:
       dockerfile: Dockerfile.generator
     container_name: siem_generator
     environment:
+      # HTTP transport, not a shared volume: the engine and generator never
+      # need to be scheduled on the same host.
       - WEBHOOK_URL=http://siem_engine:8002
+      - SIEM_INGEST_TOKEN=secret-auth-token
     ports:
       - "8001:8001"
     healthcheck:
@@ -13,6 +16,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    depends_on:
+      siem_engine:
+        condition: service_healthy
     restart: unless-stopped
 
   siem_engine:
@@ -22,15 +28,19 @@ services:
     container_name: siem_engine
     volumes:
       - ./alerts:/app/alerts
-      - ./rules.yml:/app/rules.yml
+      - ./rules.yml:/app/rules.yml:ro
     environment:
       - SIEM_SOURCE_TYPE=webhook
+      - SIEM_WEBHOOK_LISTEN_PORT=8002
       - SIEM_METRICS_PORT=8003
+      - SIEM_INGEST_TOKEN=secret-auth-token
+      - SIEM_STATE_BACKEND=redis
+      - REDIS_HOST=redis
     ports:
       - "8002:8002"
       - "8003:8003"
     depends_on:
-      siem_generator:
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/metrics')"]
@@ -39,34 +49,30 @@ services:
       retries: 3
     restart: unless-stopped
 
+  redis:
+    image: redis:7.2-alpine
+    container_name: siem_redis
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:v2.45.0
     container_name: siem_prometheus
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
       interval: 10s
       timeout: 5s
       retries: 3
-    restart: unless-stopped
-
-  grafana:
-    image: grafana/grafana:10.0.3
-    container_name: siem_grafana
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
-    depends_on:
-      prometheus:
-        condition: service_healthy
     restart: unless-stopped
 
   alertmanager:
@@ -75,7 +81,23 @@ services:
     ports:
       - "9093:9093"
     volumes:
-      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.0.3
+    container_name: siem_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      # Local demo credentials only. Nothing here is reachable off-host.
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       prometheus:
         condition: service_healthy
